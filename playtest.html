@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>弹幕修仙（机制验证原型）</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#07060d; overflow:hidden;
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif; }
+  #wrap { width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; }
+  canvas { background:#0a0814; box-shadow:0 0 60px rgba(90,110,220,.25);
+    image-rendering:auto; max-width:100%; max-height:100%; }
+  #tip { position:fixed; left:12px; bottom:10px; color:#5c678f; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="cv" width="1280" height="720"></canvas></div>
+<div id="tip">浏览器机制原型 · 与 Godot 版同规则同数值 · WASD 移动 / J 或左键 御剑 / 空格 更换道袍 / 1 2 3 择道袍</div>
+<script>
+'use strict';
+const W = 1280, H = 720;
+const cv = document.getElementById('cv'), g = cv.getContext('2d');
+const RED = 0, BLUE = 1, WHITE = 2;
+const CN = ['赤炎', '玄冰', '太清'];
+const MAIN = ['#fa3f45', '#389eff', '#eef2ff'];
+const GLOW = ['#ff8f3c', '#73dbff', '#d6e6ff'];
+const CORE = ['#fff0cc', '#e6f7ff', '#ffffff'];
+const DARK = ['#661020', '#06295f', '#48566e'];
+const TITLE = ['赤炎剑体', '玄冰遁法', '太清罡气'];
+const TAG   = ['双排飞剑', '身法 +50%', '罡气护盾 10'];
+const DESC  = [
+  ['免疫【赤炎】属性弹','攻击化作 · 双排飞剑','伤害 8 × 2'],
+  ['免疫【玄冰】属性弹','身法提速 + 50%','单排飞剑 伤害 10'],
+  ['免疫【太清】属性弹','十点罡气护盾','十息无伤 · 护盾自动回满'],
+];
+
+// ---------- 输入 ----------
+const keys = {};
+addEventListener('keydown', e => {
+  if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
+  if (!keys[e.key]) onPress(e.key);
+  keys[e.key] = true;
+});
+addEventListener('keyup', e => { keys[e.key] = false; });
+let mouseDown = false;
+cv.addEventListener('mousedown', e => { mouseDown = true; onPress('MOUSE', e); });
+addEventListener('mouseup', () => mouseDown = false);
+
+function kd(...a) { return a.some(k => keys[k]); }
+
+// ---------- 状态 ----------
+let scene = 'title';         // title / select / level / result
+let picked = [RED, WHITE];
+let win = false, score = 0, resultHP = 0;
+let T = 0;
+
+const player = { x: 230, y: 360, r: 11, hp: 100, shield: 10, skins: [RED, WHITE], si: 0,
+  fire: 0, swap: 0, inv: 0, noHit: 0, flash: 0, immune: 0, trail: [], alive: true };
+const MAXHP = 100, SHIELDMAX = 10, BASESPD = 340, BLUEMUL = 1.5, SHIELDREGEN = 10;
+
+let enemies = [], bullets = [], swords = [], fx = [], boss = null;
+let waveText = '入 境', bossKilled = false;
+let script = null;   // 关卡协程
+
+// ---------- 工具 ----------
+const rnd = (a, b) => a + Math.random() * (b - a);
+const ri = n => Math.floor(Math.random() * n);
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const TAU = Math.PI * 2;
+
+function txt(s, x, y, size, col, align = 'left', ow = 3) {
+  g.font = size + 'px "Microsoft YaHei","PingFang SC",sans-serif';
+  g.textAlign = align; g.textBaseline = 'middle';
+  if (ow) { g.fillStyle = 'rgba(2,3,7,.85)';
+    for (const d of [[-ow,0],[ow,0],[0,-ow],[0,ow],[-ow,-ow],[ow,-ow],[-ow,ow],[ow,ow]])
+      g.fillText(s, x + d[0], y + d[1]); }
+  g.fillStyle = col; g.fillText(s, x, y);
+}
+function circle(x, y, r, col) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = col; g.fill(); }
+function ring(x, y, r, w, col) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.strokeStyle = col; g.lineWidth = w; g.stroke(); }
+function poly(pts, col) { g.beginPath(); pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1]));
+  g.closePath(); g.fillStyle = col; g.fill(); }
+function hex(c, a) { const n = parseInt(c.slice(1), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`; }
+function bar(x, y, w, h, ratio, col, bg = 'rgba(4,4,9,.7)', bd = 'rgba(160,175,235,.4)') {
+  g.fillStyle = 'rgba(2,2,6,.5)'; g.fillRect(x - 2, y - 2, w + 4, h + 4);
+  g.fillStyle = bg; g.fillRect(x, y, w, h);
+  g.fillStyle = col; g.fillRect(x + 2, y + 2, Math.max(0, w - 4) * clamp(ratio, 0, 1), h - 4);
+  g.strokeStyle = bd; g.lineWidth = 1.5; g.strokeRect(x, y, w, h);
+}
+const pcolor = () => player.skins[player.si];
+
+// ---------- 特效 ----------
+function burst(x, y, c, n = 12, pw = 260, d = .5) {
+  const ps = []; for (let i = 0; i < n; i++) { const a = rnd(0, TAU), s = pw * rnd(.35, 1);
+    ps.push([Math.cos(a) * s, Math.sin(a) * s]); }
+  fx.push({ k: 'b', x, y, c, ps, t: 0, d });
+}
+function fxring(x, y, c, r0, r1, d = .35, w = 5) { fx.push({ k: 'r', x, y, c, r0, r1, t: 0, d, w }); }
+function shock(x, y, c, r1 = 220, d = .55) { fx.push({ k: 's', x, y, c, r1, t: 0, d }); }
+function pop(x, y, s, c, size = 20, d = .75) { fx.push({ k: 'p', x, y, s, c, size, t: 0, d }); }
+
+function drawFx(f) {
+  const k = f.t / f.d, e = 1 - Math.pow(1 - k, 2), a = 1 - k;
+  if (f.k === 'b') for (const v of f.ps)
+    circle(f.x + v[0] * f.d * e * .55, f.y + v[1] * f.d * e * .55, 4.5 - 3.7 * k, hex(f.c, a));
+  else if (f.k === 'r') ring(f.x, f.y, f.r0 + (f.r1 - f.r0) * e, Math.max(1, f.w * a), hex(f.c, a));
+  else if (f.k === 's') { const r = 10 + (f.r1 - 10) * e;
+    circle(f.x, f.y, r * .55, hex(f.c, a * .16)); ring(f.x, f.y, r, Math.max(1, 10 * a), hex(f.c, a * .9)); }
+  else if (f.k === 'p') txt(f.s, f.x, f.y - 34 * e, f.size, hex(f.c, a), 'center');
+}
+
+// ---------- 弹幕 ----------
+function shot(c, x, y, vx, vy, r = 9, dmg = 10, turn = 0) {
+  bullets.push({ c, x, y, vx, vy, r, dmg, turn, t: 0 });
+}
+function drawBullet(b) {
+  const m = MAIN[b.c], gl = GLOW[b.c], k = CORE[b.c];
+  if (b.c === RED) {
+    circle(b.x, b.y, b.r * 1.75, hex(gl, .16)); circle(b.x, b.y, b.r * 1.25, hex(m, .42));
+    circle(b.x, b.y, b.r, m); circle(b.x, b.y, b.r * .5, k);
+  } else if (b.c === BLUE) {
+    const a = Math.atan2(b.vy, b.vx); g.save(); g.translate(b.x, b.y); g.rotate(a);
+    poly([[b.r * 1.9, 0], [0, b.r * .85], [-b.r * .9, 0], [0, -b.r * .85]], hex(gl, .22));
+    poly([[b.r * 1.45, 0], [0, b.r * .58], [-b.r * .7, 0], [0, -b.r * .58]], m);
+    circle(b.r * .4, 0, b.r * .24, k); g.restore();
+  } else {
+    circle(b.x, b.y, b.r * 1.6, hex(gl, .14)); circle(b.x, b.y, b.r * .95, hex(m, .55));
+    ring(b.x, b.y, b.r * 1.32, 3, m); circle(b.x, b.y, b.r * .34, k);
+  }
+}
+
+// ---------- 飞剑 ----------
+function fireSword(c, x, y, dmg) { swords.push({ c, x, y, vx: 980, vy: 0, dmg }); }
+function drawSword(s) {
+  const m = MAIN[s.c], gl = GLOW[s.c], k = CORE[s.c];
+  for (let i = 0; i < 3; i++) { const l = 22 + i * 16, a = .2 - i * .05;
+    g.strokeStyle = hex(gl, a); g.lineWidth = 5 - i; g.beginPath();
+    g.moveTo(s.x - l, s.y); g.lineTo(s.x - l - 16, s.y); g.stroke(); }
+  poly([[s.x + 20, s.y], [s.x, s.y - 5], [s.x - 14, s.y], [s.x, s.y + 5]], hex(gl, .35));
+  poly([[s.x + 17, s.y], [s.x, s.y - 2.6], [s.x - 11, s.y], [s.x, s.y + 2.6]], m);
+  circle(s.x + 4, s.y, 2, k);
+}
+
+// ---------- 敌人 ----------
+function spawnEnemy(c, pat, y, scale) {
+  const e = { c, pat, x: W + 70, y, baseY: y, t: 0, life: 16, hp: [26, 34, 42][c] * scale,
+    spd: [120, 165, 95][c], cd: [1.45, 1.25, 1.9][c], fire: rnd(.7, 1.5), ent: false, leave: false,
+    score: 100, flash: 0 };
+  enemies.push(e);
+}
+function drawEnemy(e) {
+  const m = MAIN[e.c], gl = GLOW[e.c], k = CORE[e.c], dk = DARK[e.c];
+  const pu = .5 + .5 * Math.sin(e.t * 5);
+  circle(e.x, e.y, 26 + 3 * pu, hex(gl, .12));
+  if (e.c === RED) { const p = [[e.x-18,e.y],[e.x-4,e.y-17],[e.x+14,e.y-8],[e.x+20,e.y],[e.x+14,e.y+8],[e.x-4,e.y+17]];
+    poly(p, dk); g.strokeStyle = m; g.lineWidth = 2.2; g.beginPath();
+    p.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath(); g.stroke(); }
+  else if (e.c === BLUE) { const p = [[e.x,e.y-20],[e.x+18,e.y],[e.x,e.y+20],[e.x-18,e.y]];
+    poly(p, dk); g.strokeStyle = m; g.lineWidth = 2.2; g.beginPath();
+    p.forEach((q, i) => i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1])); g.closePath(); g.stroke(); }
+  else { circle(e.x, e.y, 19, dk); ring(e.x, e.y, 19, 2.4, m); ring(e.x, e.y, 12, 1.6, hex(k, .7)); }
+  const eye = e.c === RED ? '#fff2a0' : '#f2f8ff';
+  circle(e.x + 6, e.y - 5, 3, eye); circle(e.x + 6, e.y + 5, 3, eye);
+  if (e.flash > 0) circle(e.x, e.y, 26, hex('#ffffff', e.flash * 2.5));
+}
+
+// ---------- Boss ----------
+const BHP = 3600;
+const POOL = { 1: ['fan_red', 'aim_blue', 'rain_red'],
+  2: ['ring_white', 'spiral_rb', 'rain_blue', 'fan_red'],
+  3: ['chaos', 'spiral_rb', 'ring_white', 'homing'] };
+const DUR = { fan_red: 3.2, aim_blue: 3, rain_red: 3, rain_blue: 3, ring_white: 3.4, spiral_rb: 4.2, chaos: 4.4, homing: 3.6 };
+const TICK = { fan_red: .6, aim_blue: .55, rain_red: .17, rain_blue: .22, ring_white: .8, spiral_rb: .075, chaos: .13, homing: .45 };
+
+function spawnBoss() {
+  boss = { x: W + 220, y: 360, hp: BHP, phase: 1, st: 'enter', ward: -1, wardT: 4, wardA: 0,
+    t: 0, skill: '', cast: 0, tick: 0, spiral: 0, flash: 0, home: 985, dying: 0 };
+}
+function bossShot(c, x, y, ang, sp, r = 9, dmg = 10, turn = 0) {
+  shot(c, x, y, Math.cos(ang) * sp, Math.sin(ang) * sp, r, dmg, turn);
+}
+function bossAim(b) { return Math.atan2(player.y - b.y, player.x - b.x); }
+function bossCast(b) {
+  const s = b.skill;
+  if (s === 'fan_red') { const a = bossAim(b);
+    for (let i = 0; i < 11; i++) bossShot(RED, b.x, b.y, a + (i / 10 - .5) * 1.15, 255); }
+  else if (s === 'aim_blue') { const a = bossAim(b);
+    for (let i = 0; i < 3; i++) bossShot(BLUE, b.x, b.y, a + (i - 1) * .06, 390, 8); }
+  else if (s === 'rain_red') for (let i = 0; i < 2; i++) shot(RED, rnd(60, W - 60), -30, -110, 235);
+  else if (s === 'rain_blue') for (let i = 0; i < 2; i++) shot(BLUE, rnd(60, W - 60), -30, -110, 235, 9, 10, .55);
+  else if (s === 'ring_white') { const off = b.t * .22;
+    for (let i = 0; i < 24; i++) bossShot(WHITE, b.x, b.y, off + TAU * i / 24, 215, 10); }
+  else if (s === 'spiral_rb') { b.spiral += .36;
+    bossShot(RED, b.x, b.y, b.spiral, 235); bossShot(BLUE, b.x, b.y, b.spiral + Math.PI, 235); }
+  else if (s === 'chaos') for (let i = 0; i < 3; i++) bossShot(ri(3), b.x, b.y, rnd(0, TAU), rnd(180, 310));
+  else if (s === 'homing') { const c = b.ward >= 0 ? b.ward : ri(3); const a = bossAim(b);
+    for (let i = 0; i < 2; i++) bossShot(c, b.x, b.y, a + (i - .5) * .8, 205, 10, 10, 1.05); }
+}
+function drawBoss(b) {
+  const bc = b.ward >= 0 ? b.ward : WHITE;
+  const m = MAIN[bc], gl = GLOW[bc], k = CORE[bc];
+  const pu = .5 + .5 * Math.sin(b.t * (b.phase === 3 ? 8 : 3));
+  circle(b.x, b.y, 132 + 8 * pu, hex(gl, .07));
+  if (b.ward >= 0) {
+    const a = .55 + .35 * Math.sin(b.wardA * 7);
+    circle(b.x, b.y, 118, hex(m, .07)); ring(b.x, b.y, 118, 9, hex(m, a));
+    ring(b.x, b.y, 106, 3, hex(k, a * .55));
+    for (let i = 0; i < 8; i++) { const an = b.wardA * 1.2 + TAU * i / 8;
+      circle(b.x + Math.cos(an) * 118, b.y + Math.sin(an) * 118, 4.5, hex(k, a)); }
+  }
+  for (let i = 0; i < 3; i++) { const an = b.t * .85 + TAU * i / 3;
+    const px = b.x + Math.cos(an) * 96, py = b.y + Math.sin(an) * 96;
+    const rr = i === b.ward ? 17 : 11;
+    circle(px, py, rr + 6, hex(GLOW[i], .2)); circle(px, py, rr, MAIN[i]);
+    circle(px, py, rr * .42, CORE[i]); }
+  const pts = []; for (let i = 0; i < 16; i++) { const an = TAU * i / 16;
+    const rr = 62 + Math.sin(an * 3 + b.t * 1.6) * 7; pts.push([b.x + Math.cos(an) * rr, b.y + Math.sin(an) * rr]); }
+  poly(pts, '#22102a');
+  g.strokeStyle = hex(m, .85); g.lineWidth = 3; g.beginPath();
+  pts.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.stroke();
+  for (const s of [-1, 1]) { const hn = [[b.x-10,b.y+s*40],[b.x-46,b.y+s*84],[b.x+6,b.y+s*52]];
+    poly(hn, '#22102a'); g.strokeStyle = hex(m, .8); g.lineWidth = 2; g.beginPath();
+    hn.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.stroke(); }
+  circle(b.x + 6, b.y, 26, '#0d0410'); ring(b.x + 6, b.y, 26, 3, hex(m, .9));
+  circle(b.x + 6, b.y, 13 + 2 * pu, b.phase < 3 ? '#ff4d38' : '#ffd94d');
+  circle(b.x + 6, b.y, 5.5, '#100310');
+  if (b.phase === 3) for (let i = 0; i < 12; i++) { const an = -b.t * 1.6 + TAU * i / 12;
+    const rr = 140 + 12 * Math.sin(b.t * 6 + i);
+    circle(b.x + Math.cos(an) * rr, b.y + Math.sin(an) * rr, 5, 'rgba(255,90,60,.55)'); }
+  if (b.flash > 0) circle(b.x, b.y, 70, hex('#ffffff', b.flash * 2.2));
+}
+
+// ---------- 玩家 ----------
+function drawPlayer() {
+  if (!player.alive) return;
+  const c = pcolor(), m = MAIN[c], gl = GLOW[c], k = CORE[c], dk = DARK[c];
+  const pu = .5 + .5 * Math.sin(T * 4);
+  for (let i = player.trail.length - 1; i >= 0; i--) {
+    const p = player.trail[i], a = .22 * (1 - i / player.trail.length);
+    circle(p[0], p[1], 12 - i, hex(gl, a));
+  }
+  const al = player.inv > 0 ? .35 + .35 * (.5 + .5 * Math.sin(T * 45)) : 1;
+  g.globalAlpha = al;
+  circle(player.x, player.y, 26 + 3 * pu, hex(gl, .1));
+  ring(player.x, player.y, 23 + 2.5 * pu, 2, hex(m, .45));
+  if (c === WHITE && player.shield > 0) { ring(player.x, player.y, 30, 4, 'rgba(255,255,255,.85)'); }
+  for (let i = 0; i < 3; i++) { const a = T * 2.2 + TAU * i / 3;
+    const px = player.x + Math.cos(a) * 34, py = player.y + Math.sin(a) * 34;
+    g.save(); g.translate(px, py); g.rotate(a + Math.PI / 2);
+    poly([[7, 0], [0, -2.2], [-7, 0], [0, 2.2]], hex(m, .75)); g.restore(); }
+  if (c === RED) for (const oy of [-17, 17])
+    poly([[player.x + 14, player.y + oy], [player.x - 4, player.y + oy - 3],
+      [player.x - 8, player.y + oy], [player.x - 4, player.y + oy + 3]], hex(m, .9));
+  const bd = [[player.x+20,player.y],[player.x+6,player.y-11],[player.x-14,player.y-9],
+    [player.x-20,player.y],[player.x-14,player.y+9],[player.x+6,player.y+11]];
+  poly(bd, dk);
+  g.strokeStyle = m; g.lineWidth = 2; g.beginPath();
+  bd.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.stroke();
+  circle(player.x + 11, player.y - 1, 6, k); ring(player.x + 11, player.y - 1, 6, 1.6, m);
+  circle(player.x + 6, player.y - 8, 3.6, dk);
+  circle(player.x, player.y, 11, hex(m, .13)); circle(player.x, player.y, 3.2, 'rgba(255,255,255,.95)');
+  if (player.immune > 0) ring(player.x, player.y, 16 + (1 - player.immune / .22) * 20, 3, hex(gl, player.immune / .22));
+  g.globalAlpha = 1;
+}
+
+// ---------- 背景 ----------
+const stars = [], motes = [];
+for (let i = 0; i < 110; i++) stars.push([Math.random() * W, Math.random() * H * .72, .6 + Math.random() * 1.5]);
+for (let i = 0; i < 46; i++) motes.push([Math.random() * W, Math.random() * H, Math.random() * TAU]);
+let bgOff = 0;
+function drawBG(sp) {
+  bgOff += sp * 0.016;
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, '#0b0819'); grd.addColorStop(1, '#221a33');
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  for (const s of stars) { const x = (s[0] - bgOff * .16 % W + W) % W;
+    circle(x, s[1], s[2], `rgba(255,247,224,${.3 + .25 * Math.sin(T * 1.6 + s[1])})`); }
+  const mx = W * .8, my = H * .2;
+  circle(mx, my, 130, 'rgba(216,220,255,.05)'); circle(mx, my, 86, 'rgba(224,227,255,.06)');
+  circle(mx, my, 52, 'rgba(245,242,220,.92)');
+  mountain(bgOff * .22, H * .78, 92, '#1d1833', .7);
+  mountain(bgOff * .45, H * .87, 68, '#151129', 2.3);
+  mountain(bgOff * .85, H * .96, 44, '#0d0a1a', 4.1);
+  for (let i = 0; i < 46; i++) { const ph = motes[i][2];
+    const y = ((motes[i][1] - T * (16 + i % 5 * 9)) % H + H) % H;
+    const x = motes[i][0] + Math.sin(T * .7 + ph) * 16;
+    circle(x, y, 1.6 + i % 3 * .7, `rgba(184,220,255,${.25 + .35 * (.5 + .5 * Math.sin(T * 2.2 + ph))})`); }
+  g.fillStyle = 'rgba(26,23,46,.35)'; g.fillRect(0, H - 90, W, 90);
+}
+function mountain(off, baseY, amp, col, seed) {
+  const pts = [[-140, H + 20]];
+  for (let i = 0; i <= 72; i++) { const x = -140 + (W + 280) * i / 72; const sx = x + off;
+    const h = Math.sin(sx * .0032 + seed) * amp + Math.sin(sx * .0091 + seed * 2.1) * amp * .42
+      + Math.sin(sx * .0213 + seed * 3.7) * amp * .18;
+    pts.push([x, baseY - h]); }
+  pts.push([W + 140, H + 20]); poly(pts, col);
+}
+
+// ---------- HUD ----------
+let banner = '', bannerSub = '', bannerT = 0, bannerD = 1;
+function showBanner(t, s, d = 2.2) { banner = t; bannerSub = s; bannerD = d; bannerT = d; }
+function drawHUD() {
+  bar(26, 24, 320, 20, player.hp / MAXHP, '#f9575c');
+  txt(`元神 ${Math.max(0, player.hp)} / ${MAXHP}`, 36, 36, 15, '#f0f2ff');
+  const isW = pcolor() === WHITE;
+  bar(26, 52, 320, 12, player.shield / SHIELDMAX, isW ? 'rgba(237,244,255,.95)' : 'rgba(140,150,185,.38)');
+  txt(`罡气 ${player.shield}`, 354, 49, 14, isW ? '#ccd9ff' : '#7f8aa8');
+  if (!isW) txt('（仅太清罡气状态下生效）', 408, 49, 13, '#7b839a');
+  if (player.shield < SHIELDMAX) {
+    bar(26, 70, 320, 5, player.noHit / SHIELDREGEN, 'rgba(128,215,255,.75)');
+    txt(`十息回气 ${Math.round(player.noHit / SHIELDREGEN * 100)}%`, 354, 66, 12, '#8ccdf2');
+  }
+  player.skins.forEach((c, i) => {
+    const act = i === player.si, w = act ? 132 : 112, h = act ? 58 : 48;
+    const ox = 26 + i * 146, oy = H - 96 - (act ? 10 : 0);
+    if (act) { g.fillStyle = hex(MAIN[c], .35); g.fillRect(ox - 4, oy - 4, w + 8, h + 8); }
+    g.fillStyle = 'rgba(12,12,24,.75)'; g.fillRect(ox, oy, w, h);
+    g.strokeStyle = hex(MAIN[c], act ? .95 : .4); g.lineWidth = act ? 2 : 1.2; g.strokeRect(ox, oy, w, h);
+    g.fillStyle = MAIN[c]; g.fillRect(ox + 6, oy + 8, 12, h - 16);
+    txt(TITLE[c], ox + 26, oy + 20, act ? 16 : 14, act ? '#ffffff' : '#b8c0d8');
+    txt(TAG[c], ox + 26, oy + 40, act ? 13 : 12, hex(MAIN[c], act ? 1 : .6));
+    if (act) txt('当前', ox + w - 8, oy + 18, 13, '#ffeb8c', 'right');
+  });
+  txt('【空格】更换道袍  ·  免疫同色弹幕', 26, H - 26, 14, '#b8c6f2');
+  txt(`灵石  ${score}`, W - 26, 32, 20, '#ffea9e', 'right');
+  txt(waveText, W - 26, 56, 15, '#c7d4ff', 'right');
+  if (boss && !bossKilled) {
+    const bw = 620, bx = (W - bw) / 2;
+    bar(bx, 26, bw, 18, boss.hp / BHP, '#f24755');
+    g.fillStyle = 'rgba(6,6,10,.9)'; g.fillRect(bx + bw * .34, 24, 2, 22); g.fillRect(bx + bw * .67, 24, 2, 22);
+    txt(`血魔老祖  ·  第 ${boss.phase} 重法相`, W / 2, 20, 16, '#ffe0e0', 'center');
+    if (boss.ward >= 0) { const s = `法罩 · ${CN[boss.ward]}  →  切换【${TITLE[boss.ward]}】破之`;
+      g.font = '17px sans-serif'; const w = g.measureText(s).width + 40;
+      g.fillStyle = hex(MAIN[boss.ward], .28); g.fillRect(W / 2 - w / 2, 52, w, 28);
+      g.strokeStyle = MAIN[boss.ward]; g.lineWidth = 1.5; g.strokeRect(W / 2 - w / 2, 52, w, 28);
+      txt(s, W / 2, 66, 17, '#ffffff', 'center'); }
+    else txt('法罩未启  ·  全力输出', W / 2, 66, 15, '#9ea8c8', 'center');
+  }
+  if (bannerT > 0) { const k = bannerT / bannerD;
+    const a = clamp(Math.min(k * 3, (1 - k) * 6 + .35), 0, 1);
+    g.fillStyle = `rgba(5,5,15,${.42 * a})`; g.fillRect(0, H * .34 - 52, W, 104);
+    txt(banner, W / 2, H * .34, 42, `rgba(255,242,204,${a})`, 'center');
+    if (bannerSub) txt(bannerSub, W / 2, H * .34 + 34, 17, `rgba(220,230,255,${a})`, 'center'); }
+}
+
+// ---------- 场景绘制 ----------
+function drawTitle() {
+  drawBG(30);
+  g.fillStyle = 'rgba(5,5,12,.28)'; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 3; i++) { const a = T * .55 + TAU * i / 3;
+    const px = W / 2 + Math.cos(a) * 250, py = H * .4 + Math.sin(a) * 250;
+    circle(px, py, 34, hex(MAIN[i], .1)); circle(px, py, 15, hex(MAIN[i], .85)); circle(px, py, 6, CORE[i]); }
+  txt('弹 幕 修 仙', W / 2 + 3, H * .335 + 3, 80, 'rgba(12,5,20,.85)', 'center');
+  txt('弹 幕 修 仙', W / 2, H * .335, 80, '#fff0c2', 'center');
+  for (let i = 0; i < 3; i++) { const x = W / 2 + (i - 1) * 330;
+    g.fillStyle = 'rgba(8,8,20,.55)'; g.fillRect(x - 150, H * .335 + 96, 300, 74);
+    g.strokeStyle = hex(MAIN[i], .55); g.lineWidth = 1.5; g.strokeRect(x - 150, H * .335 + 96, 300, 74);
+    txt(`${CN[i]} · ${TITLE[i]}`, x, H * .335 + 122, 19, MAIN[i], 'center');
+    txt(TAG[i], x, H * .335 + 150, 15, '#e0e6ff', 'center'); }
+  txt('WASD / 方向键  移动      J / 鼠标左键  御剑      空格  更换道袍', W / 2, H * .72, 18, '#d9e0ff', 'center');
+  txt('进入关卡前需择【两件】道袍，关卡内可随时更换', W / 2, H * .72 + 30, 17, '#b8c2f0', 'center');
+  const a = .55 + .45 * (.5 + .5 * Math.sin(T * 3.4));
+  txt('按  Enter / J  开 始 问 道', W / 2, H * .86, 30, `rgba(255,238,158,${a})`, 'center');
+}
+function cardRect(i) { return [W / 2 + (i - 1) * 336 - 153, 188, 306, 392]; }
+function drawSelect() {
+  drawBG(26); g.fillStyle = 'rgba(5,5,15,.42)'; g.fillRect(0, 0, W, H);
+  txt('择 二 法 相', W / 2, 104, 46, '#fff0c2', 'center');
+  txt('关卡中按【空格】在两件道袍间更换 —— 免疫同色弹幕', W / 2, 146, 18, '#dbe4ff', 'center');
+  const mp = mouse();
+  for (let i = 0; i < 3; i++) {
+    const r = cardRect(i), sel = picked.indexOf(i);
+    const hov = mp && mp[0] > r[0] && mp[0] < r[0] + r[2] && mp[1] > r[1] && mp[1] < r[1] + r[3];
+    const bob = sel >= 0 ? Math.sin(T * 3 + i) * 4 : 0;
+    const y = r[1] + bob;
+    g.fillStyle = 'rgba(10,10,24,.9)'; g.fillRect(r[0], y, r[2], r[3]);
+    if (sel >= 0) { g.fillStyle = hex(MAIN[i], .3); g.fillRect(r[0] - 6, y - 6, r[2] + 12, r[3] + 12); }
+    g.strokeStyle = hex(MAIN[i], sel >= 0 ? .95 : (hov ? .75 : .42)); g.lineWidth = sel >= 0 ? 3 : 2;
+    g.strokeRect(r[0], y, r[2], r[3]);
+    g.fillStyle = MAIN[i]; g.fillRect(r[0], y, r[2], 10);
+    const cx = r[0] + r[2] / 2, pu = .5 + .5 * Math.sin(T * 2.4 + i);
+    circle(cx, y + 92, 54 + 5 * pu, hex(MAIN[i], .1)); circle(cx, y + 92, 40, hex(MAIN[i], .22));
+    circle(cx, y + 92, 27, MAIN[i]); circle(cx, y + 92, 12, CORE[i]);
+    txt(TITLE[i], cx, y + 176, 26, '#ffffff', 'center');
+    txt(`免疫【${CN[i]}】弹`, cx, y + 208, 17, MAIN[i], 'center');
+    DESC[i].forEach((s, j) => txt(s, cx, y + 248 + j * 27, 15, '#d6e0ff', 'center'));
+    if (sel >= 0) { const bx = r[0] + r[2] - 34, by = y + 40;
+      circle(bx, by, 24, hex(MAIN[i], .95)); txt(['', '壹', '贰'][sel + 1], bx, by, 22, '#0f0f18', 'center'); }
+    txt(`按 ${i + 1} 键`, cx, y + r[3] - 22, 14, '#99a4c4', 'center');
+  }
+  const names = picked.map(c => TITLE[c]);
+  txt('已择：' + (names.length ? names.join(' + ') : '（尚未选择）'), W / 2, 636, 22, '#ffebaa', 'center');
+  const a = .55 + .45 * (.5 + .5 * Math.sin(T * 3.4));
+  txt(picked.length === 2 ? '按 Enter 开始问道（需择满两件）' : `再择 ${2 - picked.length} 件道袍`,
+    W / 2, 676, 22, `rgba(255,242,184,${a})`, 'center');
+  txt('ESC 返回标题', W / 2, 704, 15, '#99a4cc', 'center');
+}
+function drawResult() {
+  drawBG(20); g.fillStyle = 'rgba(5,5,15,.55)'; g.fillRect(0, 0, W, H);
+  txt(win ? '道 成' : '道 消', W / 2, H * .3, 88, win ? '#ffebaa' : '#f26b6b', 'center');
+  txt(win ? '血魔老祖伏诛 · 此劫已渡' : '元神溃散 · 再来问道', W / 2, H * .3 + 58, 22, '#e0e6ff', 'center');
+  g.fillStyle = 'rgba(8,8,20,.6)'; g.fillRect(W / 2 - 230, H * .47, 460, 116);
+  g.strokeStyle = 'rgba(153,163,242,.3)'; g.lineWidth = 1.5; g.strokeRect(W / 2 - 230, H * .47, 460, 116);
+  txt(`灵石  ${score}`, W / 2, H * .47 + 40, 34, '#ffea9e', 'center');
+  const rank = score >= 14000 ? '天品 · 元婴' : score >= 10000 ? '地品 · 金丹' : score >= 6500 ? '玄品 · 筑基' : '黄品 · 炼气';
+  txt(`品阶  ${rank}`, W / 2, H * .47 + 78, 20, '#dbe4ff', 'center');
+  const a = .55 + .45 * (.5 + .5 * Math.sin(T * 3.4));
+  txt('R / J  再 来 一 次', W / 2, H * .72, 26, `rgba(255,242,184,${a})`, 'center');
+  txt('Enter  回 到 标 题', W / 2, H * .72 + 38, 20, '#d1d8ff', 'center');
+}
+
+// ---------- 鼠标 ----------
+let mousePos = null;
+function mouse() { return mousePos; }
+cv.addEventListener('mousemove', e => {
+  const r = cv.getBoundingClientRect();
+  mousePos = [(e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height];
+});
+
+function onPress(key, ev) {
+  if (scene === 'title') {
+    if (key === 'Enter' || key === 'j' || key === 'J' || key === 'k' || key === 'K' || key === 'MOUSE') scene = 'select';
+  } else if (scene === 'select') {
+    if (key === '1' || key === '2' || key === '3') togglePick(+key - 1);
+    else if (key === 'MOUSE') { const m = mouse(); if (m) for (let i = 0; i < 3; i++) { const r = cardRect(i);
+      if (m[0] > r[0] && m[0] < r[0] + r[2] && m[1] > r[1] && m[1] < r[1] + r[3]) togglePick(i); } }
+    else if (key === 'Enter') { if (picked.length === 2) startLevel(); }
+    else if (key === 'Escape') scene = 'title';
+  } else if (scene === 'level') {
+    if (key === ' ') doSwap();
+  } else if (scene === 'result') {
+    if (key === 'r' || key === 'R' || key === 'j' || key === 'J' || key === 'MOUSE') startLevel();
+    else if (key === 'Enter' || key === 'Escape') scene = 'title';
+  }
+}
+function togglePick(i) {
+  const at = picked.indexOf(i);
+  if (at >= 0) picked.splice(at, 1);
+  else { if (picked.length >= 2) picked.shift(); picked.push(i);
+    const r = cardRect(i); fxring(r[0] + r[2] / 2, r[1] + r[3] / 2, MAIN[i], 20, 210, .4, 6); }
+}
+
+// ---------- 玩家逻辑 ----------
+function doSwap() {
+  if (player.skins.length < 2 || !player.alive) return;
+  player.si = (player.si + 1) % player.skins.length;
+  player.swap = .2; player.inv = Math.max(player.inv, .18);
+  fxring(player.x, player.y, MAIN[pcolor()], 6, 52, .32, 7);
+}
+function hurt(c, dmg) {
+  if (!player.alive || player.inv > 0) return false;
+  if (c === pcolor()) { player.immune = .22; fxring(player.x, player.y, GLOW[c], 13, 36, .28, 3); return false; }
+  player.noHit = 0;
+  if (pcolor() === WHITE && player.shield > 0) {
+    const ab = Math.min(player.shield, dmg); player.shield -= ab; dmg -= ab;
+    fxring(player.x, player.y, '#ffffff', 18, 44, .32, 5);
+    pop(player.x, player.y - 32, `罡气 -${ab}`, '#e6f2ff', 16);
+  }
+  if (dmg > 0) {
+    player.hp -= dmg; player.inv = .85;
+    burst(player.x, player.y, MAIN[c], 14, 300, .5);
+    pop(player.x, player.y - 30, `-${dmg}`, '#ff8c80', 18);
+  }
+  player.flash = .25;
+  if (player.hp <= 0) { player.hp = 0; player.alive = false;
+    burst(player.x, player.y, '#ffffff', 36, 420, .9);
+    shock(player.x, player.y, '#ffffff', 280, .8); }
+  return true;
+}
+
+// ---------- 关卡脚本 ----------
+function startLevel() {
+  scene = 'level'; score = 0; bossKilled = false; boss = null;
+  enemies = []; bullets = []; swords = []; fx = [];
+  Object.assign(player, { x: 230, y: 360, hp: MAXHP, shield: SHIELDMAX,
+    skins: picked.slice(), si: 0, fire: 0, swap: 0, inv: 0, noHit: 0, flash: 0, immune: 0,
+    trail: [], alive: true, deadT: 0 });
+  script = levelScript();
+}
+const wait = t => new Promise(r => setTimeout(r, t * 1000));
+async function levelScript() {
+  showBanner('第一重 · 妖潮来袭', 'WASD/方向键 移动 · J 或 鼠标左键 御剑 · 空格 更换道袍', 2.6);
+  await waveRun(1, 5, 1); heal(8);
+  showBanner('第二重 · 四色齐至', '同色飞剑伤害 + 50%', 1.8); await wait(1.3);
+  await waveRun(2, 7, 1.15); heal(8);
+  showBanner('第三重 · 妖王先锋', '玄冰妖速度极快，注意走位', 1.8); await wait(1.2);
+  await waveRun(3, 8, 1.3); heal(10);
+  showBanner('血魔老祖 · 现世', '法罩开启时 —— 唯有同色飞剑可破，随时更换道袍', 2.8); await wait(1.8);
+  if (!player.alive) return;
+  waveText = '血魔老祖'; spawnBoss();
+  showBanner('血 魔 老 祖', '四色弹幕 + 属性法罩，破罩方能致胜', 2.4);
+}
+async function waveRun(n, count, scale) {
+  waveText = `第 ${n} 重 · 妖潮`;
+  for (let i = 0; i < count; i++) {
+    if (!player.alive) return;
+    const pats = ['sine', 'straight', 'hover', 'dive'];
+    spawnEnemy(ri(3), pats[ri(4)], rnd(90, H - 90), scale);
+    await wait(.62);
+  }
+  let guard = 0;
+  while (player.alive && guard < 14) { await wait(.3); guard += .3; if (enemies.length <= 1) break; }
+}
+function heal(v) { player.hp = Math.min(MAXHP, player.hp + v); fxring(player.x, player.y, '#99ffb3', 10, 40, .4, 4); }
+
+// ---------- 主循环 ----------
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
+  g.clearRect(0, 0, W, H);
+  if (scene === 'title') drawTitle();
+  else if (scene === 'select') drawSelect();
+  else if (scene === 'result') drawResult();
+  else { update(dt); drawLevel(); }
+  for (let i = fx.length - 1; i >= 0; i--) { fx[i].t += dt; if (fx[i].t >= fx[i].d) fx.splice(i, 1); else drawFx(fx[i]); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function update(dt) {
+  // 玩家
+  if (player.alive) {
+    let dx = 0, dy = 0;
+    if (kd('a', 'A', 'ArrowLeft')) dx -= 1;
+    if (kd('d', 'D', 'ArrowRight')) dx += 1;
+    if (kd('w', 'W', 'ArrowUp')) dy -= 1;
+    if (kd('s', 'S', 'ArrowDown')) dy += 1;
+    if (dx || dy) { const l = Math.hypot(dx, dy);
+      const sp = BASESPD * (pcolor() === BLUE ? BLUEMUL : 1);
+      player.x += dx / l * sp * dt; player.y += dy / l * sp * dt; }
+    player.x = clamp(player.x, 28, W - 28); player.y = clamp(player.y, 28, H - 28);
+    player.fire -= dt; player.swap -= dt; player.inv -= dt; player.flash -= dt; player.immune -= dt;
+    player.noHit += dt;
+    if (player.noHit >= SHIELDREGEN && player.shield < SHIELDMAX) {
+      player.shield = SHIELDMAX; fxring(player.x, player.y, MAIN[WHITE], 10, 38, .45, 4);
+      pop(player.x, player.y - 34, '罡气回满', MAIN[WHITE], 16);
+    }
+    if (player.fire <= 0 && (kd('j', 'J', 'k', 'K') || mouseDown)) {
+      player.fire = .105;
+      if (pcolor() === RED) { fireSword(RED, player.x + 24, player.y - 17, 8); fireSword(RED, player.x + 24, player.y + 17, 8); }
+      else fireSword(pcolor(), player.x + 30, player.y, 10);
+    }
+    if (pcolor() === BLUE) { player.trail.unshift([player.x, player.y]); if (player.trail.length > 9) player.trail.pop(); }
+    else player.trail.length = 0;
+  }
+  // 飞剑
+  for (let i = swords.length - 1; i >= 0; i--) {
+    const s = swords[i]; s.x += s.vx * dt; s.y += s.vy * dt;
+    if (s.x > W + 80) { swords.splice(i, 1); continue; }
+    let hit = false;
+    for (const e of enemies) if (Math.hypot(e.x - s.x, e.y - s.y) < 22) {
+      e.hp -= Math.round(s.dmg * (s.c === e.c ? 1.5 : 1)); e.flash = .09; hit = true;
+      pop(e.x, e.y - 26, '' + Math.round(s.dmg * (s.c === e.c ? 1.5 : 1)), s.c === e.c ? '#ffd98a' : '#ffffff', 15);
+      if (e.hp <= 0) { score += e.score; burst(e.x, e.y, GLOW[e.c], 16, 300, .6);
+        fxring(e.x, e.y, MAIN[e.c], 6, 54, .4, 5); pop(e.x, e.y, '+' + e.score, MAIN[e.c], 18);
+        enemies.splice(enemies.indexOf(e), 1); }
+      break;
+    }
+    if (!hit && boss && boss.st !== 'enter' && Math.hypot(boss.x - s.x, boss.y - s.y) < 60) {
+      const mul = boss.ward >= 0 ? (s.c === boss.ward ? 1 : .15) : 1;
+      const real = Math.max(1, Math.round(s.dmg * mul));
+      boss.hp -= real; boss.flash = .09; hit = true;
+      pop(boss.x, boss.y - 70, (mul >= 1 ? '破罩 ' : '抗性 ') + real, boss.ward >= 0 ? MAIN[boss.ward] : '#ffffff', 16);
+      const r = boss.hp / BHP; const ph = r <= .34 ? 3 : r <= .67 ? 2 : 1;
+      if (ph !== boss.phase) { boss.phase = ph; onPhase(); }
+      if (boss.hp <= 0) { boss.hp = 0; boss.dying = 1.6; boss.ward = -1; }
+    }
+    if (hit) { burst(s.x, s.y, GLOW[s.c], 5, 130, .25); swords.splice(i, 1); }
+  }
+  // 敌人
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i]; e.t += dt; e.life -= dt; e.flash = Math.max(0, e.flash - dt);
+    if (e.pat === 'straight') e.x -= e.spd * dt;
+    else if (e.pat === 'sine') { e.x -= e.spd * dt; e.y = e.baseY + Math.sin(e.t * .55 * TAU) * 70; }
+    else if (e.pat === 'hover') { if (!e.leave) { e.x += (940 - e.x) * .8 * dt; e.y = e.baseY + Math.sin(e.t * .9) * 26;
+      if (e.life < 4) e.leave = true; } else e.x += e.spd * 2.4 * dt; }
+    else if (e.pat === 'dive') { if (e.t < 1.1) e.y += Math.sign(player.y - e.y) * Math.min(210 * dt, Math.abs(player.y - e.y));
+      e.x -= e.spd * 1.35 * dt; }
+    if (e.x < W - 30) e.ent = true;
+    if (e.ent && !e.leave) { e.fire -= dt;
+      if (e.fire <= 0) { e.fire = e.cd * rnd(.8, 1.3);
+        const a = Math.atan2(player.y - e.y, player.x - e.x);
+        if (e.c === RED) for (let j = 0; j < 3; j++) shot(RED, e.x, e.y, Math.cos(a + (j - 1) * .22) * 265, Math.sin(a + (j - 1) * .22) * 265);
+        else if (e.c === BLUE) { shot(BLUE, e.x, e.y, Math.cos(a) * 340, Math.sin(a) * 340, 8);
+          shot(BLUE, e.x, e.y, Math.cos(a + .05) * 320, Math.sin(a + .05) * 320, 8); }
+        else for (let j = 0; j < 5; j++) { const an = Math.PI + (j - 2) * .34;
+          shot(WHITE, e.x, e.y, Math.cos(an) * 200, Math.sin(an) * 200, 10); } } }
+    if (e.x < -90 || e.y < -140 || e.y > H + 140) enemies.splice(i, 1);
+  }
+  // Boss
+  if (boss) {
+    boss.t += dt; boss.flash = Math.max(0, boss.flash - dt); boss.wardA += dt;
+    if (boss.dying > 0) {
+      boss.dying -= dt;
+      if (Math.random() < .5) burst(boss.x + rnd(-70, 70), boss.y + rnd(-70, 70), GLOW[ri(3)], 18, 340, .7);
+      if (boss.dying <= 0) { shock(boss.x, boss.y, '#ffffff', 900, 1.2); score += 5000;
+        waveText = '功 成'; bossKilled = true; boss = null; win = true; resultHP = player.hp;
+        setTimeout(() => { scene = 'result'; }, 1200); }
+    } else {
+      if (boss.st === 'enter') {
+        boss.x += Math.sign(boss.home - boss.x) * Math.min(260 * dt, Math.abs(boss.home - boss.x));
+        if (Math.abs(boss.x - boss.home) < 2) { boss.st = 'fight'; nextSkill(); }
+      } else {
+        const fast = boss.phase < 3 ? 1 : 1.6;
+        boss.y = 360 + Math.sin(boss.t * .42 * TAU * fast) * 132;
+        boss.x = boss.home + Math.sin(boss.t * .27 * TAU) * 62;
+        boss.wardT -= dt;
+        if (boss.wardT <= 0) { if (boss.ward >= 0) { boss.ward = -1; boss.wardT = rnd(3.2, 4.8); }
+          else { boss.ward = player.skins[ri(player.skins.length)]; boss.wardT = 5.2; boss.wardA = 0;
+            fxring(boss.x, boss.y, MAIN[boss.ward], 60, 150, .45, 8);
+            if (pcolor() !== boss.ward) pop(player.x, player.y - 52, `法罩 · ${CN[boss.ward]}`, MAIN[boss.ward], 20, 1.1); } }
+        boss.cast -= dt; boss.tick -= dt;
+        if (boss.tick <= 0) { bossCast(boss); boss.tick = TICK[boss.skill]; }
+        if (boss.cast <= 0) nextSkill();
+      }
+    }
+  }
+  function nextSkill() {
+    const pool = POOL[boss.phase]; let pick = pool[ri(pool.length)];
+    if (pool.length > 1 && pick === boss.skill) pick = pool[(pool.indexOf(pick) + 1) % pool.length];
+    boss.skill = pick; boss.cast = DUR[pick]; boss.tick = .25;
+  }
+  function onPhase() {
+    bullets.length = 0; boss.ward = -1; boss.wardT = 2.4; boss.cast = 1.3; boss.tick = 1.3;
+    boss.skill = 'ring_white'; score += 600;
+    shock(boss.x, boss.y, '#ffffff', 640, .9); fxring(boss.x, boss.y, MAIN[WHITE], 40, 420, .7, 12);
+    showBanner(`第 ${boss.phase} 重法相`, '血魔变换法相，弹幕更急', 1.6);
+  }
+  // 弹幕
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i]; b.t += dt;
+    if (b.turn > 0) { const want = Math.atan2(player.y - b.y, player.x - b.x);
+      const cur = Math.atan2(b.vy, b.vx);
+      let d = ((want - cur + Math.PI * 3) % TAU) - Math.PI;
+      const sp = Math.hypot(b.vx, b.vy); const na = cur + clamp(d, -b.turn * dt, b.turn * dt);
+      b.vx = Math.cos(na) * sp; b.vy = Math.sin(na) * sp; }
+    b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.t > 9 || b.x < -120 || b.x > W + 120 || b.y < -120 || b.y > H + 120) { bullets.splice(i, 1); continue; }
+    if (player.alive && Math.hypot(b.x - player.x, b.y - player.y) < b.r + player.r) {
+      if (hurt(b.c, b.dmg)) bullets.splice(i, 1);
+    }
+  }
+  if (player.alive) bannerT -= dt;
+  if (!player.alive && scene === 'level' && !bossKilled) {
+    if (!player.deadT) player.deadT = 1.5;
+    player.deadT -= dt;
+    if (player.deadT <= 0) { win = false; resultHP = 0; scene = 'result'; player.deadT = 0; }
+  }
+}
+function drawLevel() {
+  drawBG(boss ? 22 : 46);
+  for (const s of swords) drawSword(s);
+  for (const e of enemies) drawEnemy(e);
+  if (boss) drawBoss(boss);
+  drawPlayer();
+  for (const b of bullets) drawBullet(b);
+  drawHUD();
+}
+</script>
+</body>
+</html>
