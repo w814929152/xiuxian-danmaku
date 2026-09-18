@@ -9,7 +9,9 @@
   · 品红去背：按 min(R,B)-G 色度差做软抠图，半透明边缘同步去品红 spill
   · 裁到实际内容包围盒后再缩放到目标尺寸，避免白边影响实际占比
   · 飞剑走 SWORDS 表：显式 (剑刃宽,高) 非等比烘焙，刃部中心对齐画布中心
-  · 附带产出 _robe_test.png（玩家道袍多尺寸可辨识度对照表，供人工判定）
+
+注意：小妖 enemy_* / 妖将 elite_* / 玩家道袍 robe_* 已分别由
+tools/build_enemies.py 与 tools/build_robes.py 手绘产出，本脚本**不再**覆盖它们。
 """
 
 from __future__ import annotations
@@ -33,16 +35,9 @@ SPILL_SAT = 0.30  # 该饱和度以上且落在色相带内 -> 判为背景残�
 # ---------------------------------------------------------------- 输出清单
 # key: (源文件名前缀, 目标最长边 px；None=按背景流程处理)
 SPRITES: dict[str, tuple[str, int]] = {
-    # 玩家四袍（是否用于游戏内取决于可辨识度实测；先按大图导出）
-    "player_red": ("7e14e999", 256),
-    "player_blue": ("bfa38efe", 256),
-    "player_white": ("5f4b9eeb", 256),
-    "player_yellow": ("a5a7d644", 256),
-    # 小妖（碰撞半径 19 -> 直径 38，图形略大 42）
-    "enemy_red": ("8fe7554d", 42),
-    "enemy_blue": ("de890712", 42),
-    "enemy_yellow": ("80b50f1b", 42),
-    "enemy_white": ("f34567b9", 42),
+    # 不要再收录 enemy_* / elite_* / robe_*：这三个系列已改由 build_enemies.py
+    # 与 build_robes.py 手绘产出。本表一旦收录，重跑本脚本就会用旧 AI 源图
+    # 覆盖掉手绘资产（enemy_* 曾因此被打回异形怪物图）。
     # Boss（碰撞半径 56，法相图形 150）
     "boss": ("4d775633", 150),
     # 弹幕：统一为「白模弹丸」，运行期用 modulate 染属性色（用户要求四色同形）。
@@ -73,7 +68,6 @@ SPRITES: dict[str, tuple[str, int]] = {
 # key: (源前缀, 剑刃宽, 剑刃高, 剑刃x范围(源图,闭区间), 剑刃厚度锚带y(源图))
 SWORDS: dict[str, tuple[str, int, int, tuple[int, int], tuple[int, int]]] = {
     "sword_player": ("a9e67593", 34, 11, (267, 816), (27, 74)),
-    "sword_enemy": ("ccbb5071", 34, 12, (250, 790), (36, 121)),
 }
 BG_KEY = "bg_mountains"
 BG_FILE = "2d2d0c2e"
@@ -222,50 +216,8 @@ def main() -> int:
         bg = make_bg(bg_matches[0])
         bg.save(OUT_DIR / (BG_KEY + ".png"))
         report.append(f"[OK] {BG_KEY}.png {bg.size[0]}x{bg.size[1]} (no key)")
-    build_robe_test()
     print("\n".join(report))
     return 0
-
-
-def build_robe_test() -> None:
-    """玩家道袍多尺寸对照表：模拟游戏内 1x 渲染（最近邻），供人工判定。"""
-    cells: list[tuple[str, list[Image.Image]]] = []
-    for key in ("player_red", "player_blue", "player_white", "player_yellow"):
-        src = OUT_DIR / (key + ".png")
-        if not src.exists():
-            continue
-        img = Image.open(src).convert("RGBA")
-        sizes = [22, 32, 44, 64, 96, 160]
-        row: list[Image.Image] = []
-        for s in sizes:
-            # 等比：以高度为准（人形立绘竖长）
-            w = max(1, int(round(img.width * s / img.height)))
-            # 先 LANCZOS 缩小到 2 倍目标，再 NEAREST 到目标 —— 模拟纹理过滤
-            tmp = img.resize((w * 2, s * 2), Image.LANCZOS)
-            row.append(tmp.resize((w, s), Image.NEAREST))
-        cells.append((key, row))
-    if not cells:
-        return
-    sizes = [22, 32, 44, 64, 96, 160]
-    pad, label = 12, 22
-    row_h = max(im.height for _, row in cells for im in row) + label + pad
-    col_w = [max(row[i].width for _, row in cells) + pad for i in range(len(sizes))]
-    W = sum(col_w) + pad
-    H = len(cells) * row_h + pad + 30
-    sheet = Image.new("RGBA", (W, H), (24, 22, 34, 255))
-    from PIL import ImageDraw
-    dr = ImageDraw.Draw(sheet)
-    for i, s in enumerate(sizes):
-        x = pad + sum(col_w[:i])
-        dr.text((x, 4), f"h={s}px", fill=(255, 230, 120, 255))
-    for r, (key, row) in enumerate(cells):
-        y = pad + 30 + r * row_h
-        dr.text((4, y + label + 2), key, fill=(180, 200, 255, 255))
-        for i, im in enumerate(row):
-            x = pad + sum(col_w[:i]) + (col_w[i] - pad - im.width) // 2
-            sheet.paste(im, (x, y + label), im)
-    sheet.convert("RGB").save(Path(r"D:\demo\_robe_test.png"))
-    print(f"[OK] robe test -> D:\\demo\\_robe_test.png")
 
 
 if __name__ == "__main__":

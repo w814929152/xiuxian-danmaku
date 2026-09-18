@@ -21,11 +21,6 @@ const DIR := "res://assets/sprites/"
 const _CN := ["red", "blue", "white", "yellow"]
 
 const FILES: Dictionary[String, String] = {
-	# 玩家四袍（大尺寸立绘，用于道袍库等展示场合）
-	"player_red": "player_red.png",
-	"player_blue": "player_blue.png",
-	"player_white": "player_white.png",
-	"player_yellow": "player_yellow.png",
 	# 玩家 in-game 像素道袍：44x36 侧身人形（朝右），由 tools/build_robes.py 手绘
 	# （不是立绘缩小 —— 立绘缩到这个尺寸会糊）。四件共用同一基础剪影；颜色仍是
 	# 属性识别的第一载体，但每件另有 1~2 个**形状层身份部件**（红双剑 / 蓝飘带
@@ -54,7 +49,6 @@ const FILES: Dictionary[String, String] = {
 	"danmaku": "danmaku.png",
 	# 白模：使用处以 modulate 染成属性色
 	"sword_player": "sword_player.png",
-	"sword_enemy": "sword_enemy.png",
 	"fx_burst": "fx_burst.png",
 	# 满画幅背景（唯一无需去背的源图）
 	"bg_mountains": "bg_mountains.png",
