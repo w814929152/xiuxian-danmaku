@@ -84,6 +84,7 @@ func show_result(_win: bool) -> void:
 	add_child(s)
 	s.again_pressed.connect(start_level)
 	s.title_pressed.connect(show_title)
+	s.swap_pressed.connect(show_select)   # 保留当前难度，直接回择袍界面
 
 
 func restart_level() -> void:

@@ -315,7 +315,7 @@ func do_swap() -> void:
 
 
 # ---------------------------------------------------------------- 受伤
-## 返回 true 表示弹幕应被消耗；false 表示穿过（免疫 / 无敌帧）
+## 返回 true 表示弹幕应被消耗（被吸收 / 打中）；false 表示穿过（无敌帧 / 无量罩）
 func take_hit(c: int, dmg: int) -> bool:
 	if not alive or _invuln > 0.0:
 		return false
@@ -331,10 +331,11 @@ func take_hit(c: int, dmg: int) -> bool:
 		Fx.ring(world, position, Game.COLOR_MAIN[randi() % 4], 17.0, 48.0, 0.26, 4.0)
 		return false
 	if c == color:
-		# 同色免疫
+		# 同色吸收：道袍把这一枚吞下去（Danmaku 收到 true 会 _kill 消失），玩家不掉血。
+		# 光环由「内 -> 外」翻成「外 -> 内」收拢：读起来是吸入，而不是弹开。
 		_immune = 0.22
-		Fx.ring(world, position, Game.COLOR_GLOW[c], 13.0, 36.0, 0.28, 3.0)
-		return false
+		Fx.ring(world, position, Game.COLOR_GLOW[c], 34.0, 8.0, 0.24, 3.0)
+		return true
 
 	_no_hit = 0.0
 	if color == Game.WHITE and shield > 0:

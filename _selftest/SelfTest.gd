@@ -8,6 +8,9 @@ var _finished := false
 ## 妖将 killed 信号的接收记录（信号回调没法返回值，只能落到这里再断言）
 var _elite_killed := false
 var _elite_score := 0
+## 结算界面 swap_pressed 的接收记录（GDScript 的 lambda 捕获局部变量是值捕获，
+## 信号回调里改写局部变量外面读不到 —— 落成员上才收得到）
+var _swapped := false
 
 
 func _ready() -> void:
@@ -21,6 +24,7 @@ func _ready() -> void:
 	await _test_level()
 	await _test_boss()
 	await _test_difficulty()
+	await _test_score_persist()
 	await _test_death()
 	await _test_win()      # 击杀 Boss 会切换场景，必须放在最后
 	_finish_all()
@@ -128,8 +132,8 @@ func _test_player() -> void:
 	_ck(p.color == Game.WHITE, "初始皮肤 = 太清(白)")
 
 	var used := p.take_hit(Game.WHITE, 10)
-	_ck(used == false, "白皮肤免疫白弹（弹幕穿过）")
-	_ck(p.hp == Player.MAX_HP, "免疫后血量不变")
+	_ck(used == true, "白皮肤吸收白弹（弹幕消失）")
+	_ck(p.hp == Player.MAX_HP, "吸收后血量不变")
 
 	p._invuln = 0.0
 	p.take_hit(Game.RED, 6)
@@ -149,7 +153,7 @@ func _test_player() -> void:
 	p.do_swap()
 	_ck(p.color == Game.RED, "空格切换 -> 赤炎(红)")
 	p._invuln = 0.0
-	_ck(p.take_hit(Game.RED, 10) == false, "红皮肤免疫红弹")
+	_ck(p.take_hit(Game.RED, 10) == true, "红皮肤吸收红弹（弹幕消失）")
 	p._invuln = 0.0
 	_ck(p.take_hit(Game.BLUE, 10) == true, "红皮肤吃蓝弹并扣血")
 
@@ -175,6 +179,39 @@ func _test_player() -> void:
 	else:
 		_ck(false, "移速测试无效：红皮肤位移为 0")
 
+	# ---------- 同色吸收：走真实弹幕链路 ----------
+	# 只断言 take_hit 的返回值是不够的 —— 真正要保证的是那颗弹真的从场上消失了。
+	# 这里让一颗同色弹压在玩家身上，看它有没有被 _kill 掉。
+	p._invuln = 0.0
+	p.robes = [Game.RED, Game.BLUE]
+	p.robe_idx = 0
+	p.position = Vector2(400.0, 360.0)
+	await _frames(2)
+	var hp_before := p.hp
+	var bd := Danmaku.spawn(self, Game.RED, p.position, Vector2.ZERO, 10, 9.0)
+	_ck(bd != null, "同色吸收：测试弹生成成功")
+	if bd != null:
+		for _i in 12:
+			if not bd._alive:
+				break
+			await get_tree().physics_frame
+		_ck(not bd._alive, "同色弹被道袍吸收 -> 弹幕消失（不再穿过）")
+	_ck(p.hp == hp_before, "吸收同色弹不掉血")
+	# 对照组：无量罩期间仍是「穿过」而非吸收 —— 这条别被上面的改动带偏
+	p._invuln = 0.0
+	p.apply_pickup(Pickup.T.INVINC)
+	var bi := Danmaku.spawn(self, Game.BLUE, p.position, Vector2.ZERO, 10, 9.0)
+	_ck(bi != null, "无量罩对照：测试弹生成成功")
+	if bi != null:
+		for _j in 12:
+			await get_tree().physics_frame
+			if not bi._alive:
+				break
+		_ck(bi._alive, "无量罩期间弹幕仍穿过（未被吸收）")
+		bi.dissolve()
+	p.invinc = 0.0
+	await _frames(2)
+
 	p.queue_free()
 	await _frames(2)
 
@@ -192,8 +229,8 @@ func _test_yellow() -> void:
 	_ck(p.color == Game.YELLOW, "换上戊土符袍(黄)")
 
 	p._invuln = 0.0
-	_ck(p.take_hit(Game.YELLOW, 10) == false, "戊土符袍免疫戊土弹（弹幕穿过）")
-	_ck(p.hp == Player.MAX_HP, "免疫戊土弹不掉血")
+	_ck(p.take_hit(Game.YELLOW, 10) == true, "戊土符袍吸收戊土弹（弹幕消失）")
+	_ck(p.hp == Player.MAX_HP, "吸收戊土弹不掉血")
 
 	# 过热：出光每秒 +20，封顶 100
 	p.heat = 0.0
@@ -730,7 +767,7 @@ func _test_difficulty() -> void:
 			break
 		await get_tree().process_frame
 	_ck(b._st == "fight", "简单：老祖入场到位（进入 fight）")
-	_ck(b.max_hp == 1000, "简单：老祖血量 1000")
+	_ck(b.max_hp == 1400, "简单：老祖血量 1400（提血后够走完三幕）")
 	_ck(b.phase_marks().size() == 1, "简单：两重法相（一条阶段刻度）")
 	await _frames(300)          # 跨过首个法罩周期（约 4 秒）
 	Engine.time_scale = 1.0
@@ -802,6 +839,118 @@ func _test_difficulty() -> void:
 
 	lv2.queue_free()
 	await _frames(3)
+	Game.difficulty = Game.NORMAL
+
+
+# ------------------------------------------------------------ 计分 / 品阶 / 最高分 / 换袍再来
+## 覆盖：难度计分倍率、品阶阈值、最高分本地持久化、结算界面 swap_pressed
+## 最高分存档是玩家的真实用户数据 —— 测试前后原样备份还原，不污染
+func _test_score_persist() -> void:
+	print("------ score / rank / highscore ------")
+	var backup: Dictionary = Game.highscores.duplicate(true)
+
+	# ---- 难度计分倍率 ----
+	Game.difficulty = Game.EASY
+	_ck(absf(Game.score_multiplier() - 1.00) < 0.001, "简单：计分倍率 1.00")
+	Game.difficulty = Game.NORMAL
+	_ck(absf(Game.score_multiplier() - 1.15) < 0.001, "普通：计分倍率 1.15")
+	Game.difficulty = Game.HARD
+	_ck(absf(Game.score_multiplier() - 1.35) < 0.001, "困难：计分倍率 1.35")
+
+	# ---- 关卡实际落账：走的是 _add_score，与 HUD / 结算同源 ----
+	Game.picked_robes = [Game.RED, Game.WHITE]
+	var lv := Level.new()
+	add_child(lv)
+	lv._running = false
+	await _frames(3)
+	lv.score = 0
+	lv._add_score(100)
+	_ck(lv.score == 135, "困难：原始 100 分 × 1.35 -> 落账 135（实测 %d）" % lv.score)
+	Game.difficulty = Game.EASY
+	lv.score = 0
+	lv._add_score(100)
+	_ck(lv.score == 100, "简单：原始 100 分 × 1.00 -> 落账 100（实测 %d）" % lv.score)
+	lv.queue_free()
+	await _frames(3)
+
+	# ---- 品阶阈值（针对加权后的分数）----
+	_ck(Game.rank_of(5999) == "黄品 · 炼气", "品阶：5999 -> 黄品 · 炼气")
+	_ck(Game.rank_of(6000) == "玄品 · 筑基", "品阶：6000 -> 玄品 · 筑基")
+	_ck(Game.rank_of(9000) == "地品 · 金丹", "品阶：9000 -> 地品 · 金丹")
+	_ck(Game.rank_of(12500) == "天品 · 元婴", "品阶：12500 -> 天品 · 元婴")
+	Game.difficulty = Game.HARD
+	var hard_max := int(roundf(9800.0 * Game.score_multiplier()))
+	_ck(hard_max >= 12500, "顶档可及：困难满分 9800 × 1.35 = %d ≥ 12500" % hard_max)
+	Game.difficulty = Game.NORMAL
+	var norm_max := int(roundf(9800.0 * Game.score_multiplier()))
+	_ck(norm_max < 12500 and norm_max >= 9000,
+		"普通满分 9800 × 1.15 = %d -> 止步地品" % norm_max)
+
+	# ---- 最高分持久化 ----
+	Game.highscores = {}
+	_ck(Game.highscore_for(Game.NORMAL) == 0, "无存档 -> 最高分 0")
+	Game.save_highscore(Game.NORMAL, 8000, [Game.RED, Game.WHITE], Game.rank_of(8000), true)
+	_ck(Game.highscore_for(Game.NORMAL) == 8000, "写入 -> 最高分 8000")
+	_ck(Game.highscore_for(Game.HARD) == 0, "最高分按难度分档（困难档仍为 0）")
+	Game.save_highscore(Game.NORMAL, 5000, [Game.RED, Game.WHITE], Game.rank_of(5000), true)
+	_ck(Game.highscore_for(Game.NORMAL) == 8000, "低分不覆盖 -> 仍为 8000")
+	Game.save_highscore(Game.NORMAL, 11000, [Game.RED, Game.WHITE], Game.rank_of(11000), true)
+	_ck(Game.highscore_for(Game.NORMAL) == 11000, "高分覆盖 -> 11000")
+	Game._load_highscores()      # 真的落盘了吗 —— 重读一次就知道
+	_ck(Game.highscore_for(Game.NORMAL) == 11000, "重读 user://highscores.json -> 仍是 11000")
+	var rec: Variant = Game.highscores["1"]
+	_ck(typeof(rec) == TYPE_DICTIONARY, "存档条目为 Dictionary（score / robes / rank / win）")
+
+	# ---- _finish 的破纪录判定 ----
+	Game.highscores = {}
+	Game.difficulty = Game.NORMAL
+	var lv2 := Level.new()
+	add_child(lv2)
+	lv2._running = false
+	await _frames(3)
+	lv2.score = 7777
+	lv2._finish(true)
+	_ck(Game.result_is_new_high, "首局 7777 分 -> 破纪录置位")
+	_ck(Game.result_prev_high == 0, "首局：历史最高为 0")
+	_ck(Game.result_score == 7777, "结算分 = 关卡分 7777")
+	_ck(Game.highscore_for(Game.NORMAL) == 7777, "结算时写入最高分 7777")
+	lv2.queue_free()
+	await _frames(3)
+
+	var lv3 := Level.new()
+	add_child(lv3)
+	lv3._running = false
+	await _frames(3)
+	lv3.score = 1000
+	lv3._finish(true)
+	_ck(not Game.result_is_new_high, "次局 1000 分 -> 未破纪录（标记复位）")
+	_ck(Game.result_prev_high == 7777, "次局：历史最高读回 7777")
+	_ck(Game.highscore_for(Game.NORMAL) == 7777, "低分不写入 -> 最高分仍为 7777")
+	lv3.queue_free()
+	await _frames(3)
+
+	# ---- 结算界面：T 换袍再来 ----
+	var rs := ResultScreen.new()
+	rs.win = true
+	add_child(rs)
+	await _frames(3)
+	_ck(rs.has_signal("swap_pressed"), "结算界面具备 swap_pressed 信号")
+	_ck(InputMap.has_action("swap_again"), "输入映射已注册 swap_again")
+	var kt := InputEventKey.new()
+	kt.keycode = KEY_T
+	kt.physical_keycode = KEY_T
+	_ck(InputMap.event_is_action(kt, "swap_again"), "T 键已绑定 swap_again（T 未被占用）")
+	_swapped = false
+	rs.swap_pressed.connect(func() -> void:
+		_swapped = true
+	)
+	await _press("swap_again")
+	_ck(_swapped, "结算界面 T 键 -> 发出 swap_pressed")
+	rs.queue_free()
+	await _frames(3)
+
+	Game.highscores = backup
+	Game._write_highscores()
 	Game.difficulty = Game.NORMAL
 
 
