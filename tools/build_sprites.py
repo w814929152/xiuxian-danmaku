@@ -21,6 +21,10 @@ from pathlib import Path
 
 from PIL import Image
 
+# 源图目录 D:\demo\xiuxian-level-assets_assets 已在 2026-09-18 的工作区清理中删除，
+# 本脚本目前无法从源图重跑（所有条目都会打印 [MISS]）。
+# 现成的 assets/sprites/*.png 不受影响，游戏与导出均正常。
+# 若日后要重新烘焙：先恢复源图目录，再把这里的路径指过去。
 SRC_DIR = Path(r"D:\demo\xiuxian-level-assets_assets")
 OUT_DIR = Path(r"D:\demo\xiuxian-danmaku\assets\sprites")
 
