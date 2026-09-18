@@ -58,16 +58,11 @@ func wait(t: float) -> void:
 
 
 # ---------------------------------------------------------------- 流程
-## 空档 = 横幅显示时长 + 紧随的 wait()（两者叠加，玩家都还没动手）。
-## 重标定前合计 15.3 秒，节奏被切成四段碎觉；现在压到 7.6 秒：
-##   2.1 + 1.7 + 1.7 + 2.1 = 7.6
-## 横幅时长都留得比 wait 长一点 —— 让尾巴 0.3 秒压在下一波开头，
-## 字还在淡出时妖已经进场，衔接不断档。
 func _run() -> void:
 	hud.show_banner("第 一 重 · 妖潮来袭",
 		"%s 难度 · WASD/方向键 移动 · J 或 鼠标左键 御剑 · 空格 更换道袍" % Game.diff_name(),
-		1.2)
-	await wait(0.9)
+		2.6)
+	await wait(2.0)
 	if not _running:
 		return
 
@@ -75,8 +70,8 @@ func _run() -> void:
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("第二重 · 四色齐至", "同色飞剑伤害 + 50%", 1.0)
-	await wait(0.7)
+	hud.show_banner("第二重 · 四色齐至", "同色飞剑伤害 + 50%", 1.8)
+	await wait(1.3)
 	if not _running:
 		return
 
@@ -84,8 +79,8 @@ func _run() -> void:
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("第三重 · 妖王先锋", "玄冰妖速度极快，注意走位", 1.0)
-	await wait(0.7)
+	hud.show_banner("第三重 · 妖王先锋", "玄冰妖速度极快，注意走位", 1.8)
+	await wait(1.2)
 	if not _running:
 		return
 
@@ -93,8 +88,8 @@ func _run() -> void:
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("血魔老祖 · 现世", "法罩开启时 —— 唯有同色飞剑可破，随时更换道袍", 1.2)
-	await wait(0.9)
+	hud.show_banner("血魔老祖 · 现世", "法罩开启时 —— 唯有同色飞剑可破，随时更换道袍", 2.8)
+	await wait(1.8)
 	if not _running:
 		return
 	await _boss_fight()
@@ -102,10 +97,8 @@ func _run() -> void:
 
 # ---------------------------------------------------------------- HUD 数据
 ## 分数与波次文字统一走这里推送给 HUD —— HUD 不反向读 Level
-## 入参是「原始战果」，落账时统一乘难度计分倍率：
-## HUD 实时分 / 结算分 / 品阶判定 / 最高分存档因此同源同值。
 func _add_score(v: int) -> void:
-	score += int(roundf(float(v) * Game.score_multiplier()))
+	score += v
 	if hud != null:
 		hud.set_score(score)
 
@@ -292,12 +285,5 @@ func _finish(win: bool) -> void:
 	Game.result_win = win
 	Game.result_score = score
 	Game.result_hp = player.hp if (player != null and is_instance_valid(player)) else 0
-	# 先记下本局之前的最好成绩 —— 结算界面要拿它显示「历史最高」，
-	# 而存档一旦刷新它就查不到了。
-	Game.result_prev_high = Game.highscore_for(Game.difficulty)
-	Game.result_is_new_high = score > Game.result_prev_high
-	if Game.result_is_new_high:
-		Game.save_highscore(Game.difficulty, score, Game.picked_robes,
-			Game.rank_of(score), win)
 	finished.emit(win)
 

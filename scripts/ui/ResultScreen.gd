@@ -4,8 +4,6 @@ extends Node2D
 
 signal again_pressed()
 signal title_pressed()
-## 换袍再来：保留当前难度直接回择袍界面
-signal swap_pressed()
 
 var win := false
 var _t := 0.0
@@ -29,13 +27,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("confirm") or event.is_action_pressed("cancel"):
 		title_pressed.emit()
 		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed("swap_again"):
-		swap_pressed.emit()
-		get_viewport().set_input_as_handled()
 
 
 func _rank() -> String:
-	return Game.rank_of(Game.result_score)
+	var s := Game.result_score
+	if s >= 14000:
+		return "天品 · 元婴"
+	if s >= 10000:
+		return "地品 · 金丹"
+	if s >= 6500:
+		return "玄品 · 筑基"
+	return "黄品 · 炼气"
 
 
 func _draw() -> void:
@@ -51,29 +53,19 @@ func _draw() -> void:
 		Vector2(cx, H * 0.30 + 58.0), 22, Color(0.88, 0.91, 1.0),
 		HORIZONTAL_ALIGNMENT_CENTER)
 
-	draw_rect(Rect2(cx - 230.0, H * 0.47, 460.0, 142.0), Color(0.03, 0.03, 0.08, 0.6))
-	draw_rect(Rect2(cx - 230.0, H * 0.47, 460.0, 142.0), Color(0.6, 0.66, 0.95, 0.3),
+	draw_rect(Rect2(cx - 230.0, H * 0.47, 460.0, 116.0), Color(0.03, 0.03, 0.08, 0.6))
+	draw_rect(Rect2(cx - 230.0, H * 0.47, 460.0, 116.0), Color(0.6, 0.66, 0.95, 0.3),
 		false, 1.5)
 	DrawUtil.txt(self, "灵石  %d" % Game.result_score, Vector2(cx, H * 0.47 + 46.0), 34,
 		Color(1.0, 0.92, 0.62), HORIZONTAL_ALIGNMENT_CENTER)
-	DrawUtil.txt(self, "品阶  %s" % _rank(), Vector2(cx, H * 0.47 + 84.0), 20,
+	DrawUtil.txt(self, "品阶  %s" % _rank(), Vector2(cx, H * 0.47 + 82.0), 20,
 		Color(0.86, 0.90, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
-	# 历史最高：取自本地存档。破纪录时右边挂一枚「新 高」——
-	# 存档里存的是刷新后的值，所以要显示的是本局之前的成绩，否则这行永远等于灵石数。
-	DrawUtil.txt(self, "历史最高  %d" % Game.result_prev_high,
-		Vector2(cx, H * 0.47 + 112.0), 17,
-		Color(0.72, 0.78, 0.92), HORIZONTAL_ALIGNMENT_CENTER)
-	if Game.result_is_new_high:
-		DrawUtil.txt(self, "新 高", Vector2(cx + 156.0, H * 0.47 + 112.0), 17,
-			Color(1.0, 0.86, 0.42), HORIZONTAL_ALIGNMENT_CENTER)
 	if win:
-		DrawUtil.txt(self, "残余元神  %d" % Game.result_hp, Vector2(cx, H * 0.47 + 134.0), 15,
+		DrawUtil.txt(self, "残余元神  %d" % Game.result_hp, Vector2(cx, H * 0.47 + 106.0), 16,
 			Color(0.7, 0.76, 0.92), HORIZONTAL_ALIGNMENT_CENTER)
 
 	var a := 0.55 + 0.45 * (0.5 + 0.5 * sin(_t * 3.4))
 	DrawUtil.txt(self, "R / J  再 来 一 次", Vector2(cx, H * 0.72), 26,
 		Color(1.0, 0.95, 0.72, a), HORIZONTAL_ALIGNMENT_CENTER)
-	DrawUtil.txt(self, "T  换 袍 再 来", Vector2(cx, H * 0.72 + 38.0), 20,
-		Color(0.82, 0.86, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
-	DrawUtil.txt(self, "Enter  回 到 标 题", Vector2(cx, H * 0.72 + 76.0), 20,
+	DrawUtil.txt(self, "Enter  回 到 标 题", Vector2(cx, H * 0.72 + 38.0), 20,
 		Color(0.82, 0.86, 1.0), HORIZONTAL_ALIGNMENT_CENTER)

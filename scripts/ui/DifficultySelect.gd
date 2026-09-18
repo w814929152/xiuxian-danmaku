@@ -99,7 +99,7 @@ static func _accent(i: int) -> Color:
 static func _lines(i: int) -> PackedStringArray:
 	if i == Game.EASY:
 		return PackedStringArray([
-			"老祖元神  1400",
+			"老祖元神  1000",
 			"法相  两重",
 			"属性法罩  无",
 			"弹幕密度  55%",
