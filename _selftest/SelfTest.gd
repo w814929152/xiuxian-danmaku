@@ -22,6 +22,7 @@ func _ready() -> void:
 	await _test_elite()
 	await _test_pool()
 	await _test_level()
+	await _test_wave_colors()
 	await _test_boss()
 	await _test_difficulty()
 	await _test_score_persist()
@@ -305,6 +306,28 @@ func _test_yellow() -> void:
 	bm.queue_free()
 	if is_instance_valid(e):
 		e.queue_free()
+	await _frames(2)
+
+	# hover 骚扰妖离场是向右飞出画面的：出右边界必须自我回收，
+	# 否则它永远等不到 free，清场判定会被一路拖到上限（同色潮每重必有 hover）。
+	var eh := Enemy.new()
+	eh.world = self
+	add_child(eh)
+	eh.setup(Game.RED, "hover", 360.0, 1.0)
+	eh._leaving = true
+	eh.position = Vector2(Game.VIEW_W + 200.0, 360.0)
+	await _frames(3)
+	_ck(not is_instance_valid(eh), "hover 妖向右飞出画面 -> 自动回收")
+	# 对照组：还在逼近 / 驻留的目标色绝不能被这条规则误删
+	var ea := Enemy.new()
+	ea.world = self
+	add_child(ea)
+	ea.setup(Game.BLUE, "hover", 360.0, 1.0)
+	ea.position = Vector2(Game.VIEW_W - 60.0, 360.0)
+	await _frames(3)
+	_ck(is_instance_valid(ea), "未离场的 hover 妖不被误回收")
+	if is_instance_valid(ea):
+		ea.queue_free()
 	await _frames(2)
 
 
@@ -686,6 +709,187 @@ func _test_level() -> void:
 	lv.queue_free()
 	Engine.time_scale = 1.0
 	await _frames(3)
+
+	# _enemy_count 是「全场计数」（不做视野过滤）：必须能看到 hover 骚扰妖飞出右边界
+	# 后的自我回收，否则每重都会白等清场上限。这里跑一遍真实离场流程验证计数归零。
+	var lv2 := Level.new()
+	add_child(lv2)
+	await _frames(3)
+	lv2._running = false
+	for ch in lv2.get_children():
+		if ch is Enemy:
+			(ch as Enemy).queue_free()
+	await _frames(3)
+	var hpats: Array[String] = ["straight", "sine"]
+	lv2._spawn_enemy(1.0, Game.BLUE, Game.BLUE, hpats)   # c == harass -> 强制 hover
+	var n_before := lv2._enemy_count()
+	for ch in lv2.get_children():
+		if ch is Enemy:
+			(ch as Enemy)._life = 3.5          # 低于 4 秒 -> 下一帧转入离场
+			(ch as Enemy).position.x = Game.VIEW_W - 120.0
+	Engine.time_scale = 4.0
+	await _frames(40)
+	Engine.time_scale = 1.0
+	var n_after := lv2._enemy_count()
+	_ck(n_before == 1 and n_after == 0,
+		"hover 骚扰妖离场后 _enemy_count 归零（离场前 %d / 离场后 %d）" % [n_before, n_after])
+	lv2.queue_free()
+	await _frames(3)
+
+
+# ------------------------------------------------------------ 妖潮「同色潮」配色
+## 断言文案里挂反例组合；没反例就返回空串
+func _bad(s: String) -> String:
+	if s.is_empty():
+		return ""
+	return "  <- 反例 " + s
+
+
+func _robe_cn(robes: Array[int]) -> String:
+	var s := ""
+	for c in robes:
+		if not s.is_empty():
+			s += " + "
+		s += Game.COLOR_CN[c]
+	return s
+
+
+## 目标色序列是否严格在 a / b 两色之间交替（序列里不含骚扰色）
+func _strict_alt(tgt: Array[int], a: int, b: int) -> bool:
+	for c in tgt:
+		if c != a and c != b:
+			return false
+	for i in tgt.size() - 1:
+		if tgt[i] == tgt[i + 1]:
+			return false
+	return true
+
+
+## 配色随玩家道袍 S 对称生成：目标色 ∈ S、骚扰色 ∈ S'。
+## 六种道袍组合 × 每种摇 20 次（序列生成带随机，只跑一次盖不住）。
+func _test_wave_colors() -> void:
+	print("------ wave colors ------")
+	var f_cnt := ""
+	var f_w1 := ""
+	var f_alt := ""
+	var f_w2 := ""
+	var f_w3 := ""
+	var f_run := ""
+	var f_union := ""
+	for a in 4:
+		for b in 4:
+			if b <= a:
+				continue
+			var robes: Array[int] = [a, b]
+			var cn := _robe_cn(robes)
+			var comp := Level._complement(robes)
+			if comp.size() != 2:
+				_ck(false, "S' 补集应为 2 色（%s 实测 %d）" % [cn, comp.size()])
+				continue
+			var h2: int = comp[0]
+			var h3: int = comp[1]
+			for _rep in 20:
+				var w1 := Level._wave_colors(1, robes, h2, h3)
+				var w2 := Level._wave_colors(2, robes, h2, h3)
+				var w3 := Level._wave_colors(3, robes, h2, h3)
+				# 只数 5 / 7 / 8 = 20：这是 P0-1 满分（9800）的基数，不能漂
+				if w1.size() != 5 or w2.size() != 7 or w3.size() != 8:
+					if f_cnt.is_empty():
+						f_cnt = cn
+				# 第 1 重：5 只全 = 第二件袍色
+				var ok1 := true
+				for c in w1:
+					if c != b:
+						ok1 = false
+				if not ok1 and f_w1.is_empty():
+					f_w1 = cn
+				# 第 2 重：目标色严格交替 + 骚扰色 2 只
+				var tgt2: Array[int] = []
+				var n_h2 := 0
+				for c in w2:
+					if c == h2:
+						n_h2 += 1
+					else:
+						tgt2.append(c)
+				if n_h2 != 2 and f_w2.is_empty():
+					f_w2 = cn
+				if not _strict_alt(tgt2, a, b) and f_alt.is_empty():
+					f_alt = cn + " -> " + str(tgt2)
+				# 第 3 重：骚扰色 3 只，且必须是第 2 重没用过的那一色
+				var n_h3 := 0
+				var n_h2_in_w3 := 0
+				for c in w3:
+					if c == h3:
+						n_h3 += 1
+					elif c == h2:
+						n_h2_in_w3 += 1
+				if (n_h3 != 3 or n_h2_in_w3 != 0) and f_w3.is_empty():
+					f_w3 = cn
+				# 连长：第 2 / 3 重不许出现连续 ≥3 同色
+				#（第 1 重是刻意的一色到底 —— 教换袍的教学重，不在约束内）
+				if Level._max_run(w2) > 2 or Level._max_run(w3) > 2:
+					if f_run.is_empty():
+						f_run = cn
+				# 三波并集 = 全 4 色
+				var seen := {}
+				for c in w1:
+					seen[c] = true
+				for c in w2:
+					seen[c] = true
+				for c in w3:
+					seen[c] = true
+				if seen.size() != 4 and f_union.is_empty():
+					f_union = "%s -> %d 色" % [cn, seen.size()]
+	_ck(f_cnt.is_empty(), "六种组合：只数 5 / 7 / 8 合计 20（分数基数不变）" + _bad(f_cnt))
+	_ck(f_w1.is_empty(), "六种组合：第 1 重 5 只全为第二件袍色" + _bad(f_w1))
+	_ck(f_alt.is_empty(), "六种组合：第 2 重目标色严格交替" + _bad(f_alt))
+	_ck(f_w2.is_empty(), "六种组合：第 2 重骚扰色 2 只" + _bad(f_w2))
+	_ck(f_w3.is_empty(), "六种组合：第 3 重骚扰色 3 只且换色（≠ 第 2 重）" + _bad(f_w3))
+	_ck(f_run.is_empty(), "六种组合：第 2 / 3 重无连续 ≥3 同色" + _bad(f_run))
+	_ck(f_union.is_empty(), "六种组合：三波敌色并集 = 全 4 色" + _bad(f_union))
+
+	# ---------- 骚扰色恒 hover ----------
+	var lv := Level.new()
+	add_child(lv)
+	lv._running = false
+	await _frames(3)
+	lv.player.robes = [Game.RED, Game.WHITE]
+	lv._plan_harass()
+	var h2v: int = lv._harass[0]
+	var h3v: int = lv._harass[1]
+	_ck(h2v != h3v, "两重骚扰色不同（%s / %s）" % [Game.COLOR_CN[h2v], Game.COLOR_CN[h3v]])
+	_ck(h2v != Game.RED and h2v != Game.WHITE, "骚扰色 ∈ S'（玩家永远免疫不了）")
+	var pats: Array[String] = ["straight", "sine", "dive"]
+	lv._spawn_enemy(1.0, h2v, h2v, pats)
+	lv._spawn_enemy(1.0, h3v, h3v, pats)
+	await _frames(2)
+	var hover_n := 0
+	var other_n := 0
+	for ch in lv.get_children():
+		if ch is Enemy:
+			if (ch as Enemy).pattern == "hover":
+				hover_n += 1
+			else:
+				other_n += 1
+	_ck(hover_n == 2 and other_n == 0,
+		"骚扰色强制 hover（hover %d / 非 hover %d）" % [hover_n, other_n])
+	# 目标色走模式池，不会误落 hover
+	lv._spawn_enemy(1.0, Game.RED, h2v, pats)
+	await _frames(2)
+	var tp := ""
+	for ch2 in lv.get_children():
+		if ch2 is Enemy and (ch2 as Enemy).color == Game.RED:
+			tp = (ch2 as Enemy).pattern
+	_ck(tp != "hover" and pats.has(tp), "目标色走 straight / sine / dive（实测 %s）" % tp)
+	lv.queue_free()
+	await _frames(3)
+
+	# ---------- 递进参数 ----------
+	_ck(not Level._wave_moves(1).has("dive"), "第 1 重不出 dive（开局不俯冲）")
+	_ck(Level._wave_moves(3).has("dive"), "第 3 重含 dive")
+	_ck(absf(Level._wave_gap(1) - 0.62) < 0.001, "第 1 重出怪间隔 0.62")
+	_ck(absf(Level._wave_gap(2) - 0.55) < 0.001, "第 2 重出怪间隔 0.55")
+	_ck(absf(Level._wave_gap(3) - 0.50) < 0.001, "第 3 重出怪间隔 0.50")
 
 
 # ------------------------------------------------------------ Boss

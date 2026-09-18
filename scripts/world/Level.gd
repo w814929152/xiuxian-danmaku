@@ -16,6 +16,15 @@ const DROP_CHANCE := 0.18
 ## 每波妖潮结束后额外刷新的道具数（每局固定 3 个）
 const WAVE_DROP := 1
 
+## 单色连长上限：允许 2 连，禁止连续 ≥3 同色。
+## （第 1 重是刻意的一色到底 —— 教换袍的教学重，不受此限。）
+const MAX_RUN := 2
+
+## 每重「目标色」的只数（∈ 玩家道袍色，负责换袍增伤）。
+## 三重的只数 = 5 / (5+2) / (5+3) = 20 —— 这个 20 是 P0-1 满分（9800）的基数，
+## 动配额之前必须先把计分重算一遍。
+const WAVE_TARGETS := 5
+
 var player: Player = null
 var boss: Boss = null
 var hud: HUD = null
@@ -24,6 +33,9 @@ var score: int = 0
 var wave_text: String = "入 境"
 var paused: bool = false
 var _running: bool = false
+## 本局两重的「骚扰色」（∈ S'，玩家永远免疫不了，只负责走位承压）。
+## [0] 给第 2 重、[1] 给第 3 重，两重必定不同色 —— 第 3 重才凑齐四色。
+var _harass: Array[int] = []
 
 
 func _ready() -> void:
@@ -37,6 +49,7 @@ func _ready() -> void:
 		player.robes.append(int(c))
 	add_child(player)
 	player.player_died.connect(_on_player_died)
+	_plan_harass()          # 敌色依赖道袍，得等 robes 定下来才能排
 
 	hud = HUD.new()
 	hud.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -64,32 +77,34 @@ func wait(t: float) -> void:
 ## 横幅时长都留得比 wait 长一点 —— 让尾巴 0.3 秒压在下一波开头，
 ## 字还在淡出时妖已经进场，衔接不断档。
 func _run() -> void:
-	hud.show_banner("第 一 重 · 妖潮来袭",
-		"%s 难度 · WASD/方向键 移动 · J 或 鼠标左键 御剑 · 空格 更换道袍" % Game.diff_name(),
-		1.2)
+	# 第 1 重点名：直接报出本重主色与对应的那件道袍，把「换袍」教在第一次遭遇上。
+	#（原来这行是操作提示 —— 那部分游戏说明里已有，横幅让给更关键的换袍教学。）
+	var t1: int = player.robes[1] if player.robes.size() > 1 else Game.WHITE
+	hud.show_banner("第 一 重 · %s 妖潮" % Game.COLOR_CN[t1],
+		"换上【%s】—— 免疫同色弹幕，飞剑伤害 +50%%" % Game.ROBE_TITLE[t1], 1.2)
 	await wait(0.9)
 	if not _running:
 		return
 
-	await _wave(1, 5, 1.0)
+	await _wave(1, 1.0)
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("第二重 · 四色齐至", "同色飞剑伤害 + 50%", 1.0)
+	hud.show_banner("第 二 重 · 双色交替", "同色飞剑伤害 + 50% · 异色妖只能硬躲", 1.0)
 	await wait(0.7)
 	if not _running:
 		return
 
-	await _wave(2, 7, 1.15, true)
+	await _wave(2, 1.15, true)
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("第三重 · 妖王先锋", "玄冰妖速度极快，注意走位", 1.0)
+	hud.show_banner("第 三 重 · 妖王先锋", "老祖将至 · 四色齐至", 1.0)
 	await wait(0.7)
 	if not _running:
 		return
 
-	await _wave(3, 8, 1.3, true)
+	await _wave(3, 1.3, true)
 	if not _running:
 		return
 	_drop_wave()
@@ -127,14 +142,174 @@ func _on_restart_requested() -> void:
 	restart_requested.emit()
 
 
+# ---------------------------------------------------------------- 妖潮配色
+# 敌色不再逐只 randi()%4，而是随玩家两件道袍 S 对称生成：
+#   目标色 ∈ S   —— 逼换袍（同色飞剑 +50%，且被道袍吸收）
+#   骚扰色 ∈ S'  —— 逼走位（玩家永远免疫不了，远驻 hover 放弹）
+# 独立随机会产出「连续 4 只同色」，玩家全程不用换袍，换袍这根支柱就漂没了；
+# 所以走「配额 + 约束洗牌」，先把整波色序排好再按序放怪。
+# ----------------------------------------------------------------
+
+## S' = 四色里玩家没选的那些色（robes 恒为 2 个不同色，故恒为 2 个）
+static func _complement(robes: Array[int]) -> Array[int]:
+	var out: Array[int] = []
+	for c in Game.COLOR_CN.size():
+		if not robes.has(c):
+			out.append(c)
+	return out
+
+
+## 本局两重的骚扰色：S' 洗牌后 [0] 给第 2 重、[1] 给第 3 重（跨局有变化）
+func _plan_harass() -> void:
+	var comp := _complement(player.robes)
+	if comp.size() < 2:
+		comp = [Game.RED, Game.WHITE, Game.BLUE, Game.YELLOW]
+	comp.shuffle()
+	_harass = comp
+
+
+## 第 n 重的出怪色序（长度即本重只数）
+## [param robes] 玩家两件道袍色 S  [param h2] 第 2 重骚扰色  [param h3] 第 3 重骚扰色
+static func _wave_colors(n: int, robes: Array[int], h2: int, h3: int) -> Array[int]:
+	var a: int = robes[1] if robes.size() > 1 else Game.RED     # 主色（第 1 重整重都是它）
+	var b: int = robes[0] if robes.size() > 0 else Game.WHITE   # 副色
+	var seq: Array[int] = []
+	seq.resize(WAVE_TARGETS)
+	seq.fill(a)
+	if n <= 1:
+		return seq                    # 第 1 重：5 只全为主色，一色到底，教换袍
+	if n == 2:
+		seq = [a, b, a, b, a]        # 第 2 重：目标色严格交替（两色必换 4 次袍）
+		return _insert_harass(seq, h2, _harass_count(2))
+	# 第 3 重：目标色在两色间摆动，允许 2 连、禁止连续 ≥3 同色 —— 得自己判断何时换
+	var na := 3 if randf() < 0.5 else 2
+	seq = _alt_fill(a, b, na, WAVE_TARGETS - na, MAX_RUN)
+	return _insert_harass(seq, h3, _harass_count(3))
+
+
+## 每重的骚扰色只数（第 1 重不设骚扰色）
+static func _harass_count(n: int) -> int:
+	if n == 2:
+		return 2
+	if n >= 3:
+		return 3
+	return 0
+
+
+## 每重的出怪间隔（三重递进收紧：0.62 -> 0.55 -> 0.50）
+static func _wave_gap(n: int) -> float:
+	if n <= 1:
+		return 0.62
+	if n == 2:
+		return 0.55
+	return 0.50
+
+
+## 每重目标色的运动模式池（第 1 重不出现 dive —— 开局就俯冲太凶）
+static func _wave_moves(n: int) -> Array[String]:
+	if n <= 1:
+		return ["straight", "sine"]
+	return ["straight", "sine", "dive"]
+
+
+## 序列里最长的一段同色连长
+static func _max_run(seq: Array[int]) -> int:
+	var best := 0
+	var run := 0
+	var prev := -1
+	for c in seq:
+		if c == prev:
+			run += 1
+		else:
+			run = 1
+			prev = c
+		if run > best:
+			best = run
+	return best
+
+
+## 从 {a×ca, b×cb} 里随机排一队，要求同色连长 ≤ max_run。
+## 用「重排到合规为止」而不是逐位贪心：贪心会把余量逼进死角
+## （例如 B,B,A 之后只剩 A、A，却已两连 —— 5 只排不满）。
+static func _alt_fill(a: int, b: int, ca: int, cb: int, max_run: int) -> Array[int]:
+	for _try in 24:
+		var pool: Array[int] = []
+		for _i in ca:
+			pool.append(a)
+		for _j in cb:
+			pool.append(b)
+		pool.shuffle()
+		if _max_run(pool) <= max_run:
+			return pool
+	# 兜底：每次连续铺不超过 max_run 只就换色，一定排得满
+	var seq: Array[int] = []
+	var ra := ca
+	var rb := cb
+	while ra + rb > 0:
+		var first := a if ra >= rb else b
+		var second := b if first == a else a
+		for _k in max_run:
+			if first == a and ra > 0:
+				seq.append(a)
+				ra -= 1
+			elif first == b and rb > 0:
+				seq.append(b)
+				rb -= 1
+		for _m in max_run:
+			if second == a and ra > 0:
+				seq.append(a)
+				ra -= 1
+			elif second == b and rb > 0:
+				seq.append(b)
+				rb -= 1
+	return seq
+
+
+## 把 count 只骚扰色插进已合规的目标色序列，位置随机，但插进去会让骚扰色
+## 连长超过 MAX_RUN 的空位直接跳过。
+## 注意不能只判「左右都是 h」：已有 HH 时往它左侧插一格，左边是别的色、
+## 右边是单个 H，照样凑出 HHH —— 得把插入点左右的连长都算进去。
+static func _insert_harass(seq: Array[int], h: int, count: int) -> Array[int]:
+	for _k in count:
+		var spots: Array[int] = []
+		for p in seq.size() + 1:
+			var lrun := 0
+			var i := p - 1
+			while i >= 0 and seq[i] == h:
+				lrun += 1
+				i -= 1
+			var rrun := 0
+			var j := p
+			while j < seq.size() and seq[j] == h:
+				rrun += 1
+				j += 1
+			if lrun + 1 + rrun > MAX_RUN:
+				continue
+			spots.append(p)
+		if spots.is_empty():
+			spots.append(seq.size())
+		seq.insert(spots[randi() % spots.size()], h)
+	return seq
+
+
 ## [param elite] 本波是否以【护法妖将】压轴（第 2 / 第 3 重各一只）
-func _wave(n: int, count: int, scale: float, elite := false) -> void:
+func _wave(n: int, scale: float, elite := false) -> void:
 	_set_wave("第 %d 重 · 妖潮" % n)
-	for i in count:
+	if _harass.size() < 2:
+		_plan_harass()
+	var harass := -1
+	if n == 2:
+		harass = _harass[0]
+	elif n >= 3:
+		harass = _harass[1]
+	var seq := _wave_colors(n, player.robes, _harass[0], _harass[1])
+	var pats := _wave_moves(n)
+	var gap := _wave_gap(n)
+	for c in seq:
 		if not _running:
 			return
-		_spawn_enemy(scale)
-		await wait(0.62)
+		_spawn_enemy(scale, c, harass, pats)
+		await wait(gap)
 	if elite:
 		await wait(0.5)
 		if not _running:
@@ -151,10 +326,14 @@ func _wave(n: int, count: int, scale: float, elite := false) -> void:
 			break
 
 
-func _spawn_enemy(scale: float) -> void:
-	var c: int = randi() % 4
-	var pats := ["sine", "straight", "hover", "dive"]
-	var pat: String = pats[randi() % pats.size()]
+## [param c] 出怪色（由 _wave_colors 排定）
+## [param harass] 本重骚扰色；c == harass 时强制 hover（远驻放弹、不追击），
+##                harass < 0 表示本重没有骚扰色（第 1 重）
+## [param pats] 本重目标色的运动模式池（骚扰色不走这里）
+func _spawn_enemy(scale: float, c: int, harass: int, pats: Array[String]) -> void:
+	var pat := "hover"
+	if c != harass:
+		pat = pats[randi() % pats.size()]
 	var y := randf() * (Game.VIEW_H - 180.0) + 90.0
 	var e := Enemy.new()
 	e.world = self
@@ -164,6 +343,7 @@ func _spawn_enemy(scale: float) -> void:
 	e.killed.connect(_on_enemy_killed)
 
 
+## 场上还有几只需要清掉的小妖（妖将另算，见 _elite_alive）。
 func _enemy_count() -> int:
 	var n := 0
 	for ch in get_children():

@@ -84,7 +84,11 @@ func _process(delta: float) -> void:
 	_flash = maxf(0.0, _flash - delta)
 	_motion(delta)
 	_firing(delta)
-	if position.x < -90.0 or position.y < -140.0 or position.y > Game.VIEW_H + 140.0:
+	# 出界回收：多数妖向左飞出左边界；hover 骚扰妖离场时是向右飞出右边界的，
+	# 必须一并回收，否则它永远等不到 free，把 Level 的清场判定一直拖到上限。
+	# 只认 _leaving（hover 独有的离场态），避免误删还在逼近 x≈940 的目标色。
+	var out_right := _leaving and position.x > Game.VIEW_W + 90.0
+	if position.x < -90.0 or out_right or position.y < -140.0 or position.y > Game.VIEW_H + 140.0:
 		queue_free()
 	queue_redraw()
 
