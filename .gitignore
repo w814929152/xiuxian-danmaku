@@ -8,3 +8,8 @@ build/
 
 # 导入中断残留
 *.tmp
+
+# 开发调试临时产物（截帧/导入/自测日志）
+_capture_*.log
+_import_run.log
+_selftest_*.log

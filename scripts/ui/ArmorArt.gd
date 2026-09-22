@@ -87,10 +87,20 @@ static func draw(ci: CanvasItem, pos: Vector2, c: int, t: float, s: float) -> vo
 	ci.draw_line(pos + Vector2(-11.0, 0.0) * s, pos + Vector2(6.0, 0.0) * s,
 		Color(g.r, g.g, g.b, 0.85), 2.6 * s, true)
 
-	# 头 / 发髻
-	ci.draw_circle(pos + Vector2(11.0, -1.0) * s, 6.2 * s, k)
+	# 头 / 头部装甲壳（与 Player._draw 一致）：DARK 壳 + CANOPY 驾驶舱玻璃（敌我识别主通道）
+	ci.draw_circle(pos + Vector2(11.0, -1.0) * s, 6.2 * s, dk)
 	ci.draw_arc(pos + Vector2(11.0, -1.0) * s, 6.2 * s, 0.0, TAU, 16, m, 1.6 * s, true)
-	ci.draw_circle(pos + Vector2(6.0, -8.0) * s, 3.7 * s, dk)
+	# 驾驶舱玻璃（CANOPY）：前向倾斜椭圆，朝 +X 前方
+	var canopy := PackedVector2Array([
+		pos + Vector2(16.0, -3.4) * s, pos + Vector2(12.0, -4.4) * s,
+		pos + Vector2(9.0, 1.6) * s, pos + Vector2(13.0, 4.4) * s,
+	])
+	ci.draw_colored_polygon(canopy, Game.CANOPY)
+	ci.draw_polyline(PackedVector2Array([canopy[0], canopy[1], canopy[2], canopy[3], canopy[0]]),
+		Color(1.0, 1.0, 1.0, 0.55), 1.2 * s, true)
+	# 座舱内照明高光（CORE）+ 前向传感器探针
+	ci.draw_circle(pos + Vector2(12.6, -0.6) * s, 1.5 * s, k)
+	ci.draw_circle(pos + Vector2(17.0, -1.0) * s, 1.2 * s, m)
 
 	# 绕身光刃
 	for i in 3:

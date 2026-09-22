@@ -8,13 +8,24 @@ signal armor_changed(c: int)
 signal player_died()
 
 const MAX_HP := 100
-const SHIELD_MAX := 10
+## 光子护盾上限。护盾**不会**自动回复 —— 唯一充能入口是穿着光子盾甲（白）
+## 吞下一枚光子弹（同色吸收），见 take_hit()。
+const SHIELD_MAX := 20
+## 光子盾甲每吸收一枚光子弹的充能量（钳到 SHIELD_MAX 为止）
+const SHIELD_GAIN := 10
 const BASE_SPEED := 340.0
 const BLUE_MUL := 1.5          # 寒霜疾甲：移速 +50%
+## 寒霜疾甲：吞下一枚寒霜弹后获得 0.5 秒闪避，期间不承受任何**弹幕**伤害。
+## 只挡走 take_hit() 的弹幕通道 —— 殉爆者冲撞 / 冲击环是刻意绕过同色免疫的
+## 物理通道（EnemyBrain 里直接扣 hp），不接入本状态。
+const DODGE_TIME := 0.5
+## 闪避期的机体透明度基准：整体变淡，只叠极轻呼吸。
+## 不做高频闪烁 —— 闪避只有 0.5 秒，闪起来玩家根本读不清自己在哪里。
+const DODGE_ALPHA := 0.28
+const DODGE_BREATH := 0.06
 const HIT_R := 11.0
 const FIRE_CD := 0.105
 const SWAP_CD := 0.20
-const SHIELD_REGEN := 10.0     # 十息（10 秒）无伤 -> 护盾回满
 const INVULN := 0.85
 
 # ---------------------------------------------------------------- 引力束甲 · 引力束过热
@@ -39,7 +50,8 @@ const INVINC_TIME := 6.0      # 力场罩：无敌 6 秒
 const ATK_VIS := 0.22
 
 var hp: int = MAX_HP
-var shield: int = SHIELD_MAX
+## 光子护盾：开局为 0，靠吸收光子弹充能（上限 SHIELD_MAX，不自动回复）
+var shield: int = 0
 ## 过热值：只在使用引力束甲（黄）出束时累积
 var heat: float = 0.0
 ## 刃影模块层数 = 额外弹道排数（电浆基准双排，其余基准单排，引力基准一道束）
@@ -59,9 +71,10 @@ var alive := true
 var _fire := 0.0
 var _swap := 0.0
 var _invuln := 0.0
-var _no_hit := 0.0
 var _flash := 0.0
 var _immune := 0.0
+## 寒霜疾甲 · 闪避剩余秒数（> 0 即处于闪避）
+var _dodge := 0.0
 var _time := 0.0
 var _trail: Array[Vector2] = []
 var _firing := false      # 本帧是否正在出光
@@ -89,6 +102,16 @@ var atk_mul: float:
 var invincible: bool:
 	get:
 		return invinc > 0.0
+
+## 寒霜疾甲 · 闪避生效中（期间弹幕穿身而过）
+var dodging: bool:
+	get:
+		return _dodge > 0.0
+
+## 寒霜疾甲 · 闪避剩余秒数（HUD 只读取展示，不自己算时间）
+var dodge_left: float:
+	get:
+		return _dodge
 
 
 func can_fire() -> bool:
@@ -143,26 +166,22 @@ func _process(delta: float) -> void:
 	_invuln = maxf(0.0, _invuln - delta)
 	_flash = maxf(0.0, _flash - delta)
 	_immune = maxf(0.0, _immune - delta)
+	_dodge = maxf(0.0, _dodge - delta)
 	# 力场罩：与受击后的无敌帧（_invuln）是两套，互不干涉
 	if invinc > 0.0:
 		invinc = maxf(0.0, invinc - delta)
-
-	_no_hit += delta
-	if _no_hit >= SHIELD_REGEN and shield < SHIELD_MAX:
-		shield = SHIELD_MAX
-		stat_changed.emit()
-		Fx.ring(world, position, Game.COLOR_MAIN[Game.WHITE], 10.0, 38.0, 0.45, 4.0)
-		Fx.pop(world, position + Vector2(0.0, -34.0), "护盾回满",
-			Game.COLOR_MAIN[Game.WHITE], 16)
 
 	_move(delta)
 	_shoot()
 	_update_heat(delta)
 	_update_trail()
 
-	# 无敌闪烁
+	# 无敌闪烁。闪避是更「实」的相位化解 —— 整体比无敌帧更淡，且优先级更高，
+	# 否则吸弹后的 0.85 秒无敌帧会把闪避的读条盖掉，玩家看不出自己还在闪避中。
 	var a := 1.0
-	if _invuln > 0.0:
+	if _dodge > 0.0:
+		a = DODGE_ALPHA + DODGE_BREATH * (0.5 + 0.5 * sin(_time * 8.0))
+	elif _invuln > 0.0:
 		a = 0.35 + 0.35 * (0.5 + 0.5 * sin(_time * 45.0))
 	modulate.a = a
 	queue_redraw()
@@ -302,15 +321,23 @@ func do_swap() -> void:
 	armor_idx = (armor_idx + 1) % armors.size()
 	_swap = SWAP_CD
 	_invuln = maxf(_invuln, 0.18)
+	# 闪避是寒霜疾甲的附属能力：一脱甲就立刻失效（不留残余时间）
+	_dodge = 0.0
 	armor_changed.emit(color)
 	stat_changed.emit()
 	Fx.ring(world, position, Game.COLOR_MAIN[color], 6.0, 52.0, 0.32, 7.0)
 
 
 # ---------------------------------------------------------------- 受伤
-## 返回 true 表示弹幕应被消耗（被吸收 / 打中）；false 表示穿过（无敌帧 / 力场罩）
+## 返回 true 表示弹幕应被消耗（被吸收 / 打中）；false 表示穿过
+## （无敌帧 / 力场罩 / 寒霜疾甲闪避）
 func take_hit(c: int, dmg: int) -> bool:
 	if not alive or _invuln > 0.0:
+		return false
+	# 寒霜疾甲 · 闪避：这 0.5 秒里任何弹幕都穿身而过 ——
+	# 返回 false 是刻意的：弹幕**不消失、继续飞**（true 才会被消耗），
+	# 也不掉血、不消耗护盾、不进入受击后的无敌帧（闪避本身已经够用了）。
+	if _dodge > 0.0:
 		return false
 	# 引力（黄）弹：不论身上是否引力束甲，触及即引走热气
 	if c == Game.YELLOW and heat > 0.0:
@@ -318,7 +345,7 @@ func take_hit(c: int, dmg: int) -> bool:
 		Fx.pop(world, position + Vector2(0.0, -46.0), "散热 -%d" % int(HEAT_VENT),
 			Game.COLOR_MAIN[Game.YELLOW], 16, 0.7)
 		stat_changed.emit()
-	# 力场罩：六秒内诸法不侵（放在扣血之前，所以也不会打断十息回盾）
+	# 力场罩：六秒内诸法不侵（放在扣血之前，所以既不扣血也不消耗护盾）
 	if invinc > 0.0:
 		_immune = 0.22
 		Fx.ring(world, position, Game.COLOR_MAIN[randi() % 4], 17.0, 48.0, 0.26, 4.0)
@@ -328,9 +355,29 @@ func take_hit(c: int, dmg: int) -> bool:
 		# 光环由「内 -> 外」翻成「外 -> 内」收拢：读起来是吸入，而不是弹开。
 		_immune = 0.22
 		Fx.ring(world, position, Game.COLOR_GLOW[c], 34.0, 8.0, 0.24, 3.0)
+		# 寒霜疾甲专属：吸收的同时相位化解 -> 进入 0.5 秒闪避。
+		# 其余三件战甲吸弹只有上面那圈收拢光环，不带闪避。
+		if c == Game.BLUE:
+			_dodge = DODGE_TIME
+			Fx.ring(world, position, Game.COLOR_MAIN[Game.BLUE], 12.0, 46.0, 0.30, 3.0)
+			Fx.pop(world, position + Vector2(0.0, -30.0), "闪避",
+				Game.COLOR_GLOW[Game.BLUE], 16, 0.5)
+		# 光子盾甲专属：吞下的光子弹不白吞 —— 转为护盾充能（+10，钳到上限）。
+		# 这是护盾**唯一**的充能入口（自动回复已取消）。
+		# 守卫把 c 与 color 两态都写全：上面 `c == color` 已保证同色，这里再钉一次
+		# 「必须穿着光子盾甲」，免得有人把它挪到别的分支里去。
+		if c == Game.WHITE and color == Game.WHITE:
+			var before := shield
+			shield = mini(SHIELD_MAX, shield + SHIELD_GAIN)
+			stat_changed.emit()
+			if shield > before:
+				Fx.pop(world, position + Vector2(0.0, -32.0), "护盾 +%d" % (shield - before),
+					Game.COLOR_GLOW[Game.WHITE], 16, 0.7)
+			else:
+				Fx.pop(world, position + Vector2(0.0, -32.0), "护盾已满",
+					Game.COLOR_GLOW[Game.WHITE], 16, 0.7)
 		return true
 
-	_no_hit = 0.0
 	if color == Game.WHITE and shield > 0:
 		var ab := mini(shield, dmg)
 		shield -= ab
@@ -350,11 +397,6 @@ func take_hit(c: int, dmg: int) -> bool:
 		hp = 0
 		_die()
 	return true
-
-
-## 十息回气的读条进度 0~1
-func no_hit_ratio() -> float:
-	return clampf(_no_hit / SHIELD_REGEN, 0.0, 1.0)
 
 
 # ---------------------------------------------------------------- 拾取
@@ -504,7 +546,7 @@ func _draw() -> void:
 		rb.append(Vector2(-18.0 - t * 34.0, sin(_time * 6.0 - t * 4.0) * 7.0 * t))
 	draw_polyline(rb, Color(m.r, m.g, m.b, 0.55), 3.0, true)
 
-	# 战甲本体（矢量画法）
+	# 战甲本体（人形机甲 · 机身主装甲，侧视前倾；几何沿用已验证骨架）
 	var body := PackedVector2Array([
 		Vector2(20.0, 0.0), Vector2(6.0, -11.0), Vector2(-14.0, -9.0),
 		Vector2(-20.0, 0.0), Vector2(-14.0, 9.0), Vector2(6.0, 11.0)
@@ -513,14 +555,39 @@ func _draw() -> void:
 	var ring := PackedVector2Array(body)
 	ring.append(body[0])
 	draw_polyline(ring, m, 2.0, true)
-	# 头 / 头盔
-	draw_circle(Vector2(11.0, -1.0), 6.0, k)
+	# 头 / 头部装甲壳：DARK 壳 + CANOPY 驾驶舱玻璃（敌我识别主通道，朝 +X 前方）
+	# + 前向传感器探针（侧视关键，删了头就是个圆）+ CORE 座舱内照明高光
+	draw_circle(Vector2(11.0, -1.0), 6.0, dk)
 	draw_arc(Vector2(11.0, -1.0), 6.0, 0.0, TAU, 16, m, 1.6, true)
-	draw_circle(Vector2(6.0, -8.0), 3.6, dk)
+	# 驾驶舱玻璃（CANOPY）：前向倾斜的椭圆，读作「座舱」而非「子弹」
+	var canopy := PackedVector2Array([
+		Vector2(16.0, -3.4), Vector2(12.0, -4.4), Vector2(9.0, 1.6), Vector2(13.0, 4.4)
+	])
+	draw_colored_polygon(canopy, Game.CANOPY)
+	draw_polyline(PackedVector2Array([canopy[0], canopy[1], canopy[2], canopy[3], canopy[0]]),
+		Color(1.0, 1.0, 1.0, 0.55), 1.2, true)
+	# 座舱内照明高光（CORE）：提升 CANOPY 明度跳脱度，帮玩家在弹幕里一眼看到「友军脸」
+	draw_circle(Vector2(12.6, -0.6), 1.5, k)
+	# 前向传感器探针（NOSE）：头部装甲壳前缘的 1px 凸起
+	draw_circle(Vector2(17.0, -1.0), 1.2, m)
 
 	# 判定点
 	draw_circle(Vector2.ZERO, HIT_R, Color(m.r, m.g, m.b, 0.13))
 	draw_circle(Vector2.ZERO, 3.2, Color(1.0, 1.0, 1.0, 0.95))
+
+	# 寒霜疾甲 · 闪避：一圈向外推的相位残影环。
+	# 与「同色吸收」那圈由外向内**收拢**的光环方向相反、颜色更亮 —— 玩家据此区分
+	# 「我只是吸了一发」和「我现在 0.5 秒内打不中」。
+	if _dodge > 0.0:
+		var ph := 1.0 - _dodge / DODGE_TIME          # 0（刚触发）-> 1（即将结束）
+		var pr := 20.0 + ph * 26.0
+		# 下限 0.35 是刻意的，别当冗余 maxf 删掉：闪避最后约 10%（剩余 ~0.05 秒）时，
+		# 衰减公式 0.80*(1-ph) 已降到约 0.08，残影环几乎不可见；而此刻机身仍是约 0.29
+		# 的半透明鬼影、且马上要恢复受击 —— 正是玩家最隐形、又最需要定位锚的窗口。
+		# 不留这个下限，环会在最该被看见时彻底消失，叠上亮色弹幕时最难辨认自己。
+		var pa := maxf(0.35, 0.80 * (1.0 - ph))
+		draw_arc(Vector2.ZERO, pr, 0.0, TAU, 32, Color(g.r, g.g, g.b, pa), 3.0, true)
+		draw_arc(Vector2.ZERO, pr * 0.72, 0.0, TAU, 24, Color(1.0, 1.0, 1.0, pa * 0.5), 2.0, true)
 
 	# 免疫闪环
 	if _immune > 0.0:

@@ -1,6 +1,6 @@
 class_name Background
 extends Node2D
-## 修仙意境背景：远山剪影画底（像素 sprite）/ 月轮 / 云海 / 灵气
+## 星域背景：远星云画底（像素 sprite）/ 主行星 / 小行星带剪影 / 星云 / 星际尘埃
 ##
 ## 性能策略（Phase 4）：
 ##   · 画底 —— tools/build_sprites.py 离线烘焙的 1280x720 远山剪影，
@@ -11,10 +11,11 @@ extends Node2D
 ##   · 云海 —— 单位椭圆顶点预计算，逐帧只做变换，不再跑 cos/sin
 ## 每帧三角函数调用由 ~1300 次降到 ~120 次，绘制指令由 ~370 降到 ~105。
 
-const PERIOD := 1600.0      # 山脊循环周期（屏幕像素，必须 > 视宽）
-const TEX_SCALE := 2.0      # 山脊纹理水平压缩：2 纹理像素 = 1 屏幕像素
+const PERIOD := 1600.0      # 小行星带剪影循环周期（屏幕像素，必须 > 视宽）
+const TEX_SCALE := 2.0      # 剪影纹理水平压缩：2 纹理像素 = 1 屏幕像素
 const STAR_PERIOD := 1024.0 # 星野循环周期（屏幕像素）
-const OVAL_SEG := 24        # 云朵椭圆分段
+const NEB_PERIOD := 2048.0  # 星云循环周期（屏幕像素，最慢视差）
+const OVAL_SEG := 24        # 尘埃云带椭圆分段
 
 var scroll_speed := 46.0
 var _t := 0.0
@@ -22,7 +23,8 @@ var _off := 0.0
 
 var _sky: GradientTexture2D = null
 var _star_tex: ImageTexture = null
-var _bg_tex: Texture2D = null    # 远山剪影画底（ArtAssets 共享纹理）
+var _neb_tex: ImageTexture = null   # 星云（新增，最慢视差层）
+var _bg_tex: Texture2D = null    # 远星云画底（ArtAssets 共享纹理）
 var _mts: Array[Dictionary] = []
 var _oval: PackedVector2Array = []
 var _cloud_v: Array[Vector4] = []   # x0 / y / w / h
@@ -42,6 +44,7 @@ func _ready() -> void:
 	randomize()
 	_sky = _make_sky()
 	_star_tex = _make_stars()
+	_neb_tex = _make_nebula()
 	_mts = _make_mountains()
 	_bake_clouds()
 	for i in OVAL_SEG:
@@ -61,9 +64,9 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 
-## 供自测断言：三块周期纹理是否烘焙成功
+## 供自测断言：四块周期纹理是否烘焙成功
 func baked() -> bool:
-	return _sky != null and _star_tex != null and _mts.size() == 3
+	return _sky != null and _star_tex != null and _neb_tex != null and _mts.size() == 3
 
 
 # =============================================================== 逐帧绘制
@@ -71,63 +74,65 @@ func _draw() -> void:
 	var W := Game.VIEW_W
 	var H := Game.VIEW_H
 
-	# 远山剪影画底（满画幅，覆盖原夜空渐变 —— 渐变仍烘焙供 baked() 校验）
-	# modulate 压暗并偏深蓝：源图是亮紫插画调，直接铺会把「深色底 + 亮色元素」
-	# 的画面语言整个抬亮，角色与弹幕对比度反而下降。系数取 0.42/0.45/0.62，
-	# 天空落到 #40458c 一带，回到原来的深空调子。
+	# 远星云画底（满画幅，覆盖原夜空渐变 —— 渐变仍烘焙供 baked() 校验）
+	# modulate 更冷更暗（0.30/0.34/0.58）：让星云画底不抢弹幕，角色与弹幕对比度更高。
 	if _bg_tex != null:
 		draw_texture_rect(_bg_tex, Rect2(0.0, 0.0, W, H), false,
-			Color(0.42, 0.45, 0.62, 1.0))
+			Color(0.30, 0.34, 0.58, 1.0))
 
 	# 星野（烘焙 + 平移，整体缓慢呼吸）
 	if _star_tex != null:
 		_tile(_star_tex, _off, 0.16, 0.0, float(_star_tex.get_height()), 1.0,
 			0.40 + 0.14 * (0.5 + 0.5 * sin(_t * 0.8)))
 
-	# 逐颗明灭的亮星
+	# 逐颗明灭的亮星（冷白偏蓝、低 alpha、小半径 —— 避免与光子白弹争「近白亮点」）
 	for i in _stars.size():
 		var p := _stars[i]
 		var x := fmod(p.x - _off * 0.16 + W, W)
 		var tw := 0.45 + 0.55 * (0.5 + 0.5 * sin(_t * 1.6 + p.y))
-		draw_circle(Vector2(x, p.y), _srad[i], Color(1.0, 0.97, 0.88, 0.55 * tw))
+		draw_circle(Vector2(x, p.y), _srad[i], Color(0.88, 0.93, 1.00, 0.42 * tw))
 
-	# 月轮
+	# 星云（新增，最慢视差层；烘焙 + 平移，逐帧零成本）
+	if _neb_tex != null:
+		_tile(_neb_tex, _off, 0.10, 40.0, float(_neb_tex.get_height()), TEX_SCALE, 0.55)
+
+	# 主行星 / 母星（原月轮位置不动，构图锚点）
 	var mp := Vector2(W * 0.80, H * 0.20)
-	draw_circle(mp, 130.0, Color(0.85, 0.86, 1.00, 0.045))
-	draw_circle(mp, 86.0, Color(0.88, 0.89, 1.00, 0.055))
-	draw_circle(mp, 52.0, Color(0.96, 0.95, 0.86, 0.92))
-	draw_circle(mp + Vector2(14.0, -10.0), 44.0, Color(0.88, 0.87, 0.78, 0.35))
+	draw_circle(mp, 130.0, Color(0.42, 0.56, 0.95, 0.045))
+	draw_circle(mp, 86.0, Color(0.50, 0.64, 1.00, 0.055))
+	draw_circle(mp, 52.0, Color(0.72, 0.80, 0.98, 0.92))
+	draw_circle(mp + Vector2(14.0, -10.0), 44.0, Color(0.38, 0.44, 0.72, 0.35))  # 晨昏线暗面
 
-	# 远山三层（烘焙 + 平移）
+	# 小行星带 / 残骸带剪影三层（烘焙 + 平移）
 	for i in _mts.size():
 		var m: Dictionary = _mts[i]
 		_tile(m["tex"] as ImageTexture, _off, float(m["par"]), float(m["top"]),
 			float(m["h"]), TEX_SCALE, 1.0)
 
-	# 云海（预计算椭圆 + 变换复用）
+	# 星际尘埃 / 离子云带（预计算椭圆 + 变换复用）
 	for i in _cloud_v.size():
 		var v := _cloud_v[i]
 		var x := fmod(v.x + _off * _cloud_s[i], W + 460.0) - 230.0
 		draw_set_transform_matrix(Transform2D(0.0, Vector2(v.z, v.w), 0.0,
 			Vector2(x, v.y)))
-		draw_colored_polygon(_oval, Color(0.62, 0.66, 0.92, _cloud_a[i]))
+		draw_colored_polygon(_oval, Color(0.48, 0.52, 0.86, _cloud_a[i]))
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
-	# 灵气上升
+	# 漂浮碎屑 / 离子微粒上升
 	for i in _motes.size():
 		var p := _motes[i]
 		var y := fmod(p.y - _t * (16.0 + fmod(float(i), 5.0) * 9.0) + H, H)
 		var x := p.x + sin(_t * 0.7 + _mph[i]) * 16.0
 		var a := 0.25 + 0.35 * (0.5 + 0.5 * sin(_t * 2.2 + _mph[i]))
 		draw_circle(Vector2(x, y), 1.6 + fmod(float(i), 3.0) * 0.7,
-			Color(0.72, 0.86, 1.00, a))
+			Color(0.70, 0.84, 0.98, a))
 
-	# 底部雾气
+	# 底部雾气（读作深空暗带）
 	draw_rect(Rect2(0.0, H - 90.0, W, 90.0), Color(0.10, 0.09, 0.18, 0.35))
 
-	# 边框灵纹
-	draw_rect(Rect2(0.0, 0.0, W, 3.0), Color(0.55, 0.62, 0.95, 0.18))
-	draw_rect(Rect2(0.0, H - 3.0, W, 3.0), Color(0.55, 0.62, 0.95, 0.18))
+	# 边框（HUD 舷窗框 / 舰内视口框）
+	draw_rect(Rect2(0.0, 0.0, W, 3.0), Color(0.45, 0.70, 0.95, 0.16))
+	draw_rect(Rect2(0.0, H - 3.0, W, 3.0), Color(0.45, 0.70, 0.95, 0.16))
 
 
 ## 把一张「周期纹理」按视差平移铺满屏幕宽，最多 2~3 段即可覆盖
@@ -167,12 +172,12 @@ func _make_stars() -> ImageTexture:
 	var w := int(STAR_PERIOD)
 	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
 	var n := int(float(w * h) / 6200.0)
-	var base := Color(1.0, 0.97, 0.88)
+	var base := Color(0.86, 0.91, 1.00)   # 冷白偏蓝，饱和度低于白弹，避免争「近白亮点」
 	for i in n:
 		var x := randi() % w
 		var y := randi() % h
 		var c := base.lerp(Color(0.45, 0.46, 0.60), randf() * 0.75)
-		var s := 1 if randf() < 0.62 else 2
+		var s := 1 if randf() < 0.38 else 2   # 2px 星占比降到 38%
 		img.fill_rect(Rect2i(x, y, s, s), c)
 		if s == 2:
 			img.fill_rect(Rect2i(x - 1, y, 1, 2), c)
@@ -182,17 +187,56 @@ func _make_stars() -> ImageTexture:
 	return ImageTexture.create_from_image(img)
 
 
+## 星云：4~6 个径向渐变团一次性烘焙（紫/品红/青，线性明度 Y ≤ 0.15，
+## 禁用四档属性色相带 —— 防止星云吃掉红色弹）。逐帧只做 _tile() 平移，零成本。
+func _make_nebula() -> ImageTexture:
+	var w := int(NEB_PERIOD / TEX_SCALE)
+	var h := 420
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var blobs := 4 + (randi() % 3)   # 4~6 个
+	for b in blobs:
+		var cx := randf() * float(w)
+		var cy := randf() * float(h)
+		var rad := 90.0 + randf() * 130.0
+		# 紫 / 品红 / 青 三色随机，明度压到 Y ≤ 0.15
+		var hue_choice := randf()
+		var col: Color
+		if hue_choice < 0.34:
+			col = Color(0.30, 0.12, 0.42)   # 紫
+		elif hue_choice < 0.67:
+			col = Color(0.40, 0.14, 0.34)   # 品红
+		else:
+			col = Color(0.12, 0.30, 0.40)   # 青
+		for dy in range(-int(rad), int(rad)):
+			var y := int(cy) + dy
+			if y < 0 or y >= h:
+				continue
+			var dx := int(sqrt(rad * rad - float(dy * dy)))
+			var x0 := int(cx) - dx
+			var x1 := int(cx) + dx
+			for x in range(x0, x1):
+				if x < 0 or x >= w:
+					continue
+				var d := sqrt(float((x - int(cx)) * (x - int(cx)) + dy * dy)) / rad
+				var a := (1.0 - d) * 0.18   # 中心 alpha 0.18，边缘归零
+				if a <= 0.005:
+					continue
+				img.set_pixel(x, y, Color(col.r, col.g, col.b, a))
+	return ImageTexture.create_from_image(img)
+
+
 func _make_mountains() -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var H := Game.VIEW_H
 	var bottom := H + 60.0
 	var spec: Array[Dictionary] = [
-		{"par": 0.22, "base": 0.78, "amp": 92.0,
-			"col": Color(0.115, 0.095, 0.20), "seed": 0.7},
-		{"par": 0.45, "base": 0.87, "amp": 68.0,
-			"col": Color(0.082, 0.068, 0.15), "seed": 2.3},
-		{"par": 0.85, "base": 0.96, "amp": 44.0,
-			"col": Color(0.050, 0.042, 0.10), "seed": 4.1},
+		{"par": 0.22, "base": 0.78, "amp": 64.0,
+			"col": Color(0.13, 0.12, 0.20), "seed": 0.7},
+		{"par": 0.45, "base": 0.87, "amp": 46.0,
+			"col": Color(0.095, 0.088, 0.155), "seed": 2.3},
+		{"par": 0.85, "base": 0.96, "amp": 30.0,
+			"col": Color(0.058, 0.052, 0.10), "seed": 4.1},
 	]
 	var tw := int(PERIOD / TEX_SCALE)
 	for s in spec:
@@ -224,18 +268,18 @@ func _wave(u: float, amp: float, seedf: float) -> float:
 	var k := TAU / PERIOD
 	return sin(u * k + seedf) * amp \
 		+ sin(u * k * 3.0 + seedf * 2.1) * amp * 0.42 \
-		+ sin(u * k * 7.0 + seedf * 3.7) * amp * 0.18
+		+ sin(u * k * 11.0 + seedf * 3.7) * amp * 0.34
 
 
 func _bake_clouds() -> void:
 	var H := Game.VIEW_H
-	for i in 16:
+	for i in 12:
 		var seedf := float(i) * 1.37
 		var sp := 0.30 + fmod(seedf, 1.0) * 0.55
 		var y := H * (0.42 + fmod(seedf * 0.61, 1.0) * 0.52)
 		var w := 120.0 + fmod(seedf * 3.1, 1.0) * 210.0
 		var h := 13.0 + fmod(seedf * 5.7, 1.0) * 16.0
-		var a := 0.05 + fmod(seedf * 7.3, 1.0) * 0.06
+		var a := 0.04 + fmod(seedf * 7.3, 1.0) * 0.05
 		_cloud_v.append(Vector4(fmod(seedf * 260.0, Game.VIEW_W + 460.0), y, w, h))
 		_cloud_a.append(a)
 		_cloud_s.append(sp)

@@ -1,6 +1,6 @@
 class_name HUD
 extends Node2D
-## 战斗界面：血条 / 护盾 / 双战甲槽 / Boss 血条与护罩提示 / 始祖狂暴的血色屏幕
+## 战斗界面：血条 / 护盾 / 双战甲槽 / Boss 血条与护罩提示 / 核心狂暴的血色屏幕
 
 ## 玩家按下暂停键：HUD 只上报，由 Level 决定是否真正暂停
 signal pause_toggled(paused: bool)
@@ -28,6 +28,8 @@ const RAGE_COL := Color(1.0, 0.12, 0.09)
 ## 实体死亡后引用失效，统一靠 is_instance_valid 判断。
 var player: Player = null
 var boss: Boss = null
+## 本局关号（由 Level 在 bind() 时注入；HUD 不反向读 Level）
+var stage: int = 1
 var score: int = 0
 var wave_text: String = "出 击"
 var paused := false
@@ -47,12 +49,23 @@ func _ready() -> void:
 	z_index = 100          # 永远绘制在最上层
 
 
-func bind(p: Player) -> void:
+## [param s] 本局关号（默认第 1 关，保证裸建可用）
+func bind(p: Player, s: int = 1) -> void:
 	player = p
+	stage = s
 
 
 func bind_boss(b: Boss) -> void:
 	boss = b
+
+
+## L3 散热期：Boss 侧的状态位（**不在 §J 冻结契约里**，故用 Object.get 兜底读取）。
+## 字段缺失 / 类型不对时按「非散热期」降级 —— 绝不因为读不到一个展示位而崩 HUD。
+static func _venting_of(b: Boss) -> bool:
+	if b == null or not is_instance_valid(b):
+		return false
+	var v: Variant = b.get("venting")
+	return typeof(v) == TYPE_BOOL and bool(v)
 
 
 func set_score(v: int) -> void:
@@ -101,7 +114,7 @@ func _rage_edge() -> void:
 	_was_enraged = on
 
 
-## 始祖狂暴 —— 屏幕四周泛起血色。三条节奏叠在一起：
+## 核心狂暴 —— 屏幕四周泛起血色。三条节奏叠在一起：
 ##   1. **呼吸**（RAGE_BREATH）：缓慢起伏，让血光「活着」而不是一层死贴纸；
 ##   2. **心跳**（RAGE_BEAT）：每 RAGE_BEAT_T 秒一次尖峰衰减，这才是「闪」；
 ##   3. **强闪**（_rage_flash）：刚跌破三成那一下的爆闪 ——
@@ -164,6 +177,11 @@ func _buff_row(p: Player) -> void:
 		var ci: Color = Pickup.COL[Pickup.T.INVINC]
 		chips.append("力场 %.1fs" % p.invinc)
 		cols.append(ci)
+	# 寒霜疾甲 · 闪避：只读 Player 暴露的剩余秒数，HUD 不自己算时间
+	if p.dodging:
+		var cd: Color = Game.COLOR_GLOW[Game.BLUE]
+		chips.append("闪避 %.1fs" % p.dodge_left)
+		cols.append(cd)
 	var cx := 26.0
 	for i in chips.size():
 		var s: String = chips[i]
@@ -188,23 +206,17 @@ func _draw() -> void:
 		DrawUtil.txt(self, "生命 %d / %d" % [p.hp, Player.MAX_HP],
 			Vector2(36.0, 40.0), 15, Color(0.94, 0.95, 1.0))
 
-		# 护盾
+		# 护盾（取消自动回复后没有读条了 —— 数值直接带上限显示，玩家才看得出满值在哪）
 		var sk := float(p.shield) / float(Player.SHIELD_MAX)
 		var skc := Color(0.93, 0.96, 1.0, 0.95) if p.color == Game.WHITE \
 			else Color(0.55, 0.60, 0.72, 0.38)
 		_bar(26.0, 52.0, 320.0, 12.0, sk, skc)
-		DrawUtil.txt(self, "护盾 %d" % p.shield, Vector2(354.0, 63.0), 14,
+		DrawUtil.txt(self, "护盾 %d/%d" % [p.shield, Player.SHIELD_MAX],
+			Vector2(354.0, 63.0), 14,
 			Color(0.80, 0.86, 1.0) if p.color == Game.WHITE else Color(0.5, 0.55, 0.66))
 		if p.color != Game.WHITE:
-			DrawUtil.txt(self, "（仅光子护盾状态下生效）", Vector2(408.0, 63.0), 13,
+			DrawUtil.txt(self, "（仅光子护盾状态下生效）", Vector2(444.0, 63.0), 13,
 				Color(0.48, 0.52, 0.62))
-
-		# 无伤读条
-		if p.shield < Player.SHIELD_MAX:
-			var rt := clampf(p.no_hit_ratio(), 0.0, 1.0)
-			_bar(26.0, 70.0, 320.0, 5.0, rt, Color(0.5, 0.85, 1.0, 0.75))
-			DrawUtil.txt(self, "十息回盾 %.0f%%" % (rt * 100.0), Vector2(354.0, 78.0), 12,
-				Color(0.55, 0.8, 0.95))
 
 		# 引力束过热（引力束甲专属：满值即停手散热）
 		if p.color == Game.YELLOW or p.heat > 0.0:
@@ -252,8 +264,9 @@ func _draw() -> void:
 		Color(1.0, 0.92, 0.62), HORIZONTAL_ALIGNMENT_RIGHT)
 	DrawUtil.txt(self, wave_text, Vector2(Game.VIEW_W - 26.0, 58.0), 15,
 		Color(0.78, 0.84, 1.0), HORIZONTAL_ALIGNMENT_RIGHT)
-	DrawUtil.txt(self, "难度 · %s" % Game.diff_name(), Vector2(Game.VIEW_W - 26.0, 80.0),
-		14, Color(0.70, 0.76, 0.94), HORIZONTAL_ALIGNMENT_RIGHT)
+	DrawUtil.txt(self, "第 %d 关 · %s" % [stage, StageCfg.name_of(stage)],
+		Vector2(Game.VIEW_W - 26.0, 80.0), 14, Color(0.70, 0.76, 0.94),
+		HORIZONTAL_ALIGNMENT_RIGHT)
 
 	# ---------------- Boss ----------------
 	if boss != null and is_instance_valid(boss):
@@ -261,21 +274,30 @@ func _draw() -> void:
 		var X := (Game.VIEW_W - W) * 0.5
 		var r := float(boss.hp) / float(boss.max_hp)
 		_bar(X, 26.0, W, 18.0, r, Color(0.95, 0.28, 0.30))
-		# 阶段分隔（两重一条线，三重两条）
+		# 阶段分隔：条数由 boss.phase_marks() 决定（L1=1 / L2~L4=2 / L5=3），**不得写死**
 		for f in boss.phase_marks():
 			draw_rect(Rect2(X + W * f, 24.0, 2.0, 22.0), Color(0.05, 0.05, 0.08, 0.9))
-		var bt := "星盗始祖  ·  第 %d 阶段" % boss.phase
+		# 标题读 boss.title —— 工程禁止硬编码 Boss 名（设计 §C.3 变化 1）
+		var bt := "%s  ·  第 %d 阶段" % [boss.title, boss.phase]
 		if boss.enraged:
 			bt += "  ·  狂 暴"
 		DrawUtil.txt(self, bt, Vector2(Game.VIEW_W * 0.5, 22.0), 16,
 			Color(1.0, 0.62, 0.55) if boss.enraged else Color(1.0, 0.88, 0.88),
 			HORIZONTAL_ALIGNMENT_CENTER)
 
-		# 护罩提示
+		# 护罩提示条：**四态互斥，同时只显示一行**（设计 §C.4 终裁，全走 DrawUtil.txt）
+		# 判定顺序固定为 散热期 -> 护罩展开 -> 常驻减伤 -> 永不展护罩
+		#（散热期优先，避免与「常驻减伤中」抢同一行）
 		var wy := 68.0
-		if boss.ward >= 0:
+		if _venting_of(boss):
+			# ④ 散热期（L3 独有）—— 这是"现在能打疼"的唯一窗口，视觉上比态 3 更亮
+			DrawUtil.txt(self, "散热期 · 任意色 ×%.1f" % StageCfg.heat_mul(stage, boss.enraged),
+				Vector2(Game.VIEW_W * 0.5, wy + 4.0), 17, Game.COLOR_MAIN[Game.WHITE],
+				HORIZONTAL_ALIGNMENT_CENTER)
+		elif boss.ward >= 0:
+			# ① 护罩展开中：换甲信号跟着 ward 色走
 			var m: Color = Game.COLOR_MAIN[boss.ward]
-			var s := "护罩 · %s  →  换上【%s】破之" % [
+			var s := "护罩 · %s　换上【%s】破之" % [
 				Game.COLOR_CN[boss.ward], Game.ARMOR_TITLE[boss.ward]
 			]
 			var w := DrawUtil.tw(s, 17) + 40.0
@@ -285,12 +307,19 @@ func _draw() -> void:
 				Color(m.r, m.g, m.b, 0.95), false, 1.5)
 			DrawUtil.txt(self, s, Vector2(Game.VIEW_W * 0.5, wy + 4.0), 17,
 				Color(1, 1, 1), HORIZONTAL_ALIGNMENT_CENTER)
+		elif StageCfg.resident_resist(stage) > 0.0:
+			# ③ 常驻减伤中（L3 非散热期）
+			DrawUtil.txt(self, "装甲减伤 %d%% · 待散热" %
+					int(roundf(StageCfg.resident_resist(stage) * 100.0)),
+				Vector2(Game.VIEW_W * 0.5, wy + 4.0), 15, Color(0.72, 0.76, 0.88),
+				HORIZONTAL_ALIGNMENT_CENTER)
 		else:
-			DrawUtil.txt(self, "护罩未启  ·  全力输出",
+			# ② 永不展护罩（L2 / 其余关的护罩间隙）
+			DrawUtil.txt(self, "未展护罩 · 走位为先",
 				Vector2(Game.VIEW_W * 0.5, wy + 4.0), 15,
-				Color(0.62, 0.68, 0.82), HORIZONTAL_ALIGNMENT_CENTER)
+				Color(0.72, 0.76, 0.88), HORIZONTAL_ALIGNMENT_CENTER)
 
-	# ---------------- 始祖狂暴：屏幕四周血光 ----------------
+	# ---------------- 核心狂暴：屏幕四周血光 ----------------
 	# 画在横幅之下：横幅的文字仍压在血光之上，读得清
 	if boss != null and is_instance_valid(boss) and boss.enraged:
 		_rage_vignette()

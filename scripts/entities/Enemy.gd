@@ -16,6 +16,22 @@ var score := 100
 var world: Node2D = null
 var player_ref: Player = null
 
+## 种类（通用怪 / 7 种独有怪）与所属关卡；由 Spawner 在 add_child 前注入。
+var kind: int = EnemyKind.K.GRUNT
+var stage: int = 1
+## 不阻塞清场判定（拆解者小片 / 敷设者的雷 / 召唤物）
+var no_block_clear: bool = false
+## 拆解者小片标记（不二次分裂、同色连带秒杀）
+var _shard: bool = false
+## 敷设者布下的引力雷标记（静态、自毁、不阻塞清场）
+var _mine: bool = false
+## 变节者破绽窗口剩余（>0 时命中任意色 ×2）
+var _ward_window: float = 0.0
+## 相位者无敌剩余（>0 时不受伤害）
+var _phase_invuln: float = 0.0
+## 独有怪周期机制节拍器（变节者换色 / 相位者折跃）；不复用 _fire（那是开火冷却）
+var _brain_timer: float = 0.0
+
 var _t := 0.0
 var _fire := 0.0
 var _base_y := 360.0
@@ -27,7 +43,7 @@ var _entered := false
 var _leaving := false
 var _flash := 0.0
 var dead := false
-## 呼吸 / 尾抖的实例随机相位（YokaiArt 动画用）
+## 呼吸 / 尾抖的实例随机相位（PirateArt 动画用）
 var _phase := randf() * TAU
 
 
@@ -55,9 +71,17 @@ func setup(c: int, pat: String, y: float, hp_scale: float = 1.0) -> void:
 			fire_cd = 1.9
 			speed = 95.0
 	max_hp = hp
-	# 难度越低，星盗出手越慢（弹幕整体更稀疏）
-	fire_cd *= 2.0 - Game.bullet_scale()
+	# 关卡越靠后，星盗出手越密（弹幕整体更稀疏 → 更紧凑）—— 按关卡取弹幕密度系数
+	fire_cd *= 2.0 - StageCfg.bullet_scale(stage)
 	_fire = 0.7 + randf() * 0.8
+	# 独有怪状态复位（池化 / 复用安全）
+	_shard = false
+	_mine = false
+	_ward_window = 0.0
+	_phase_invuln = 0.0
+	_brain_timer = 0.0
+	# 碰撞半径维持 r19（EnemyKind 未提供 radius_of；art 规格允许零改动全 r19，
+	# 识别度主要来自 PirateArt 的器官绘制，不靠碰撞尺寸）
 
 
 func _ready() -> void:
@@ -77,6 +101,11 @@ func _process(delta: float) -> void:
 	_t += delta
 	_life -= delta
 	_flash = maxf(0.0, _flash - delta)
+	# 独有怪临时态倒计时（由 EnemyBrain 置位）
+	if _ward_window > 0.0:
+		_ward_window = maxf(0.0, _ward_window - delta)
+	if _phase_invuln > 0.0:
+		_phase_invuln = maxf(0.0, _phase_invuln - delta)
 	_motion(delta)
 	_firing(delta)
 	# 出界回收：多数星盗向左飞出左边界；hover 骚扰敌离场时是向右飞出右边界的，
@@ -89,6 +118,9 @@ func _process(delta: float) -> void:
 
 
 func _motion(delta: float) -> void:
+	if kind != EnemyKind.K.GRUNT:
+		EnemyBrain.move(self, delta)
+		return
 	match pattern:
 		"straight":
 			position.x -= speed * delta
@@ -128,6 +160,9 @@ func _aim() -> Vector2:
 
 
 func _shoot() -> void:
+	if kind != EnemyKind.K.GRUNT:
+		EnemyBrain.fire(self)
+		return
 	match color:
 		Game.RED:
 			# 电浆星盗：三连扇形
@@ -159,8 +194,25 @@ func _shot(c: int, dirv: Vector2, sp: float, r: float, dmg: int) -> void:
 func hit(dmg: int, c: int) -> void:
 	if dead:
 		return
+	# 相位者无敌期：不受伤害（弹幕穿过，见 _phase_invuln 由 EnemyBrain 置位）
+	if _phase_invuln > 0.0:
+		Fx.ring(world, position, Game.COLOR_GLOW[color], 6.0, 30.0, 0.2, 3.0)
+		return
 	# 同源共振：同色光刃伤害 +50%
 	var real := int(dmg * (1.5 if c == color else 1.0))
+	# 变节者破绽窗口：此间任意色 ×2
+	if _ward_window > 0.0:
+		real *= 2
+	# 拆解者小片：同色光刃连带秒杀（不同色则打不动，逼玩家换到同色甲收尾）
+	if _shard and c == color:
+		real = hp
+	# 虹吸者反向共振：命中其共振色（== 自身色）时吸收并回血，逼玩家换上「不习惯的那件」
+	if kind == EnemyKind.K.SIPHON and c == color:
+		Fx.ring(world, position, Game.COLOR_GLOW[color], 8.0, 40.0, 0.3, 4.0)
+		hp = mini(max_hp, hp + int(max_hp * 0.30))
+		_flash = 0.09
+		Fx.pop(self, Vector2(0.0, -26.0), "虹吸 +", Game.COLOR_MAIN[color], 15)
+		return
 	hp -= real
 	_flash = 0.09
 	Fx.pop(self, Vector2(0.0, -26.0), str(real),
@@ -171,16 +223,53 @@ func hit(dmg: int, c: int) -> void:
 
 func _die() -> void:
 	dead = true
+	# 殉爆者：死/撞都爆半径 150 白色冲击环（物理通道伤害 15）+ 8 片继承本体色的破片弹
+	if kind == EnemyKind.K.MARTYR:
+		Fx.shock(world, position, Color(1.0, 1.0, 1.0), 150.0, 0.5)
+		Fx.burst(world, position, Color(1.0, 1.0, 1.0), 20, 340.0, 0.6)
+		killed.emit(position, color, score)
+		queue_free()
+		# 冲击环伤害 + 破片延后一帧（避免物理回调里 spawn / 扣血）
+		EnemyBrain.martyr_explode.call_deferred(self)
+		return
+	# 拆解者：死亡分裂成 2 个小片 + 六向抛破片（延后一帧，避免物理回调里 add_child）
+	if kind == EnemyKind.K.DISMANTLER and not _shard:
+		var col := color
+		var st := stage
+		var pos := position
+		var w := world
+		# 先出爆散特效（本体位置）
+		Fx.burst(world, pos, Game.COLOR_GLOW[col], 16, 300.0, 0.6)
+		Fx.ring(world, pos, Game.COLOR_MAIN[col], 6.0, 54.0, 0.4, 5.0)
+		killed.emit(pos, col, score)
+		queue_free()
+		_spawn_shards.call_deferred(w, pos, col, st)
+		return
+	# 引力雷 / 小片：静默自毁（不给分、不阻塞清场）
+	if _mine or _shard:
+		Fx.burst(world, position, Game.COLOR_GLOW[color], 8, 180.0, 0.4)
+		killed.emit(position, color, score)
+		queue_free()
+		return
 	Fx.burst(world, position, Game.COLOR_GLOW[color], 16, 300.0, 0.6)
 	Fx.ring(world, position, Game.COLOR_MAIN[color], 6.0, 54.0, 0.4, 5.0)
 	killed.emit(position, color, score)
 	queue_free()
 
 
+## 拆解者死亡分裂：延后一帧执行（call_deferred），六向抛 2 个小片
+func _spawn_shards(w: Node2D, pos: Vector2, col: int, st: int) -> void:
+	if w == null or not is_instance_valid(w):
+		return
+	for i in EnemyKind.MAX_CLONES:
+		var a := TAU * float(i) / float(EnemyKind.MAX_CLONES)
+		EnemyBrain.spawn_shard(w, pos, col, Vector2.RIGHT.rotated(a), st)
+
+
 func _draw() -> void:
-	# 异形星盗：四色四母题矢量绘制（YokaiArt，星盗/战将共用同一剪影家族）。
-	# 层序 ①~⑧ 在 YokaiArt 内完成，这里只续画其后的覆盖层。
-	YokaiArt.draw_minion(self, color, _t, _phase)
+	# 异形星盗：四色四母题矢量绘制（PirateArt，星盗/战将共用机械阵营语法）。
+	# 层序 ①~⑧ 在 PirateArt 内完成，这里只续画其后的覆盖层。
+	PirateArt.draw_minion(self, color, _t, _phase)
 	# 受击白闪（层序 ⑨，最后覆盖）
 	if _flash > 0.0:
 		draw_circle(Vector2.ZERO, 26.0, Color(1.0, 1.0, 1.0, _flash * 2.5))

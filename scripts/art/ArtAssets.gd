@@ -21,17 +21,12 @@ const DIR := "res://assets/sprites/"
 const _CN := ["red", "blue", "white", "yellow"]
 
 const FILES: Dictionary[String, String] = {
-	# 小妖 / 妖将已回滚为矢量异形妖怪（scripts/art/YokaiArt.gd），不再引用
-	# enemy_* / elite_* 像素 PNG；文件仍保留在 assets/sprites/ 供追溯。
-	"boss": "boss.png",
-	# 弹幕：四色四形异形弹（火球 / 冰锥 / 灵环 / 符牌），使用处按属性色取图，
-	# 异形图自带颜色、不再 modulate 染色。源图已丢失（AI 源图目录被删），
-	# 这四张由 9/16 的导入缓存孤儿 .ctex（无损 WebP 存储）反解恢复，
-	# 尺寸分别为 34x34 / 34x23 / 34x34 / 33x34（异形弹画布本就不同）。
-	"danmaku_red": "danmaku_red.png",
-	"danmaku_blue": "danmaku_blue.png",
-	"danmaku_white": "danmaku_white.png",
-	"danmaku_yellow": "danmaku_yellow.png",
+	# 杂兵 / 精英 / Boss 全部回滚为矢量绘制（scripts/art/PirateArt.gd 与 Boss._draw），
+	# 不再引用 enemy_* / elite_* / boss 像素 PNG；文件仍保留在 assets/sprites/ 供追溯。
+	# 弹幕：四色同形白模弹丸（24×24），使用处 modulate 染成属性色。
+	# （曾用四色异形图 danmaku_{red,blue,white,yellow}.png，形状各异导致弹幕高峰画面杂乱，
+	#   已回退白模；四张异形图仍留在 assets/sprites/ 未删，需要时可比对。）
+	"danmaku": "danmaku.png",
 	# 白模：使用处以 modulate 染成属性色
 	"sword_player": "sword_player.png",
 	"fx_burst": "fx_burst.png",

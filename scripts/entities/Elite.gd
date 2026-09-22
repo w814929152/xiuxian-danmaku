@@ -2,10 +2,10 @@ class_name Elite
 extends Damageable
 ## 星盗战将 —— 第 2 / 第 3 波星袭的压轴精英怪
 ##
-## 核心是【属性力场】，可以理解为「会走位的始祖护罩」：
+## 核心是【属性力场】，可以理解为「会走位的旗舰护罩」：
 ##   · 力场存续时：同色光刃全额（并享同源共振 +50%），异色只剩 WARD_RESIST；
 ##     **力场不破，本体一点血都不掉** —— 不换甲就只能在力场上刮痧。
-##   · 力场色只从玩家已选的两件战甲中抽取（同始祖的护罩）。
+##   · 力场色只从玩家已选的两件战甲中抽取（同旗舰的护罩）。
 ##     这不是为了复刻机制，而是**可行性要求**：凭空给个玩家没带的颜色，
 ##     破力场就成了死局 —— 那不是难度，是设计事故。
 ##   · 打破一层 -> 虚弱期（BROKEN_TIME）：移速减半、出手放慢、本体任意颜色全额。
@@ -13,7 +13,7 @@ extends Damageable
 ##     无限重铸的话，「打不死」的挫败感会盖过「换甲破力场」的爽点。
 ## 击杀必掉一件道具（见 Level._on_elite_killed）。
 ##
-## 外观：四色异形星盗（YokaiArt 矢量绘制，主体 = 星盗 ×1.7 同剪影）
+## 外观：星盗战将精英机（PirateArt 矢量绘制，独立重画的机械底盘）
 ## + 矢量力场环 + 头顶双条（力场 / 本体）。
 ## 不走对象池 —— 一局只有两只，多一层 reset 不值。
 
@@ -25,7 +25,7 @@ const BASE_HP := 480
 const WARD_HP := 150
 ## 力场总层数：破一层虚弱一次，可重铸次数 = 层数 - 1
 const WARD_LAYERS := 2
-## 力场存续时，异色光刃只剩这个比例（始祖护罩是 0.60，这里更狠 —— 逼你换甲）
+## 力场存续时，异色光刃只剩这个比例（旗舰护罩是 0.60，这里更狠 —— 逼你换甲）
 const WARD_RESIST := 0.35
 ## 破力场后的虚弱期（秒）
 const BROKEN_TIME := 4.5
@@ -50,6 +50,8 @@ var layers := WARD_LAYERS
 var broken := 0.0
 var score := SCORE
 var dead := false
+## 所属关卡（1-based）；由 Level 在 add_child 前注入（供关卡级访问器取用，如 bullet_scale）
+var stage: int = 1
 ## 由 Level 显式注入：弹幕与特效的挂载容器
 var world: Node2D = null
 var player_ref: Player = null
@@ -62,7 +64,7 @@ var _flash := 0.0
 var _base_y := 360.0
 var _home_x := 940.0
 var _entered := false
-## 呼吸 / 尾抖的实例随机相位（YokaiArt 动画用）
+## 呼吸 / 尾抖的实例随机相位（PirateArt 动画用）
 var _phase := randf() * TAU
 
 
@@ -133,8 +135,8 @@ func _firing(delta: float) -> void:
 	_fire -= delta
 	if _fire > 0.0:
 		return
-	# 与星盗同一条规则：难度越低，出手越慢
-	var cd := FIRE_CD * (2.0 - Game.bullet_scale())
+	# 与星盗同一条规则：关卡越靠后 bullet_scale 越大，出手越快
+	var cd := FIRE_CD * (2.0 - StageCfg.bullet_scale(stage))
 	if broken > 0.0:
 		cd *= 1.8
 	_fire = cd * (0.85 + randf() * 0.3)
@@ -250,8 +252,8 @@ func _draw() -> void:
 	# ① 本命气息（r38~40，力场弧内缘 43 内留呼吸）
 	draw_circle(Vector2.ZERO, 38.0 + 2.0 * pulse, Color(g.r, g.g, g.b, 0.10))
 
-	# ②~⑧ 异形本体（YokaiArt：层序铁律在内部完成，CORE 主核最后画）
-	YokaiArt.draw_elite(self, color, _t, _phase)
+	# ②~⑧ 异形本体（PirateArt：层序铁律在内部完成，CORE 主核最后画）
+	PirateArt.draw_elite(self, color, _t, _phase)
 
 	# ⑨ 受击白闪（覆盖本体，读反馈）
 	if _flash > 0.0:

@@ -1,29 +1,33 @@
 class_name Level
 extends Node2D
-## 关卡流程：三波星袭 -> 星盗始祖
-## 第 2 / 第 3 波以【星盗战将】压轴（Elite.gd，属性力场逼玩家临阵换甲）
-## 道具两个来源：斩敌按概率掉落（DROP_CHANCE）+ 每波结束刷新 WAVE_DROP 个
-##   斩战将另有保底一件（_on_elite_killed）
+## 关卡流程：**按 `StageCfg` 的波次表数据驱动** —— 波数 3/4/4/5/5 随关变化，
+## 每波的目标色 / 骚扰色 / 独有怪 / 压轴战将 / 出怪间隔全部读配置，不再写死三波。
+## 波次跑完 -> 星盗旗舰（Boss），Boss 的血 / 阶段 / 护罩 / 弹幕密度由 `StageCfg` 决定。
+##
+## 道具两个来源：斩敌按概率掉落（`StageCfg.drop_chance(stage)`，L5 是 0.14）
+##   + 每波结束刷新 `StageCfg.wave_drop(stage)` 个；斩战将另有保底一件（`_on_elite_killed`）
 ## 波次结束**不再回血** —— 生命只靠修复包补
+##
+## 配色三条铁律（设计 §E.1，一行不改）：
+##   目标色 ∈ S（玩家两件战甲色，逼换甲）· 骚扰色 ∈ S'（补集，逼走位，恒 hover）
+##   · 禁连续 ≥3 同色（第 1 关第 1 波教学波豁免；列阵组内豁免，见 `_fold_groups`）
+## 独有怪**不自带随机色**：色由本文件统一从 S / S' 分配 —— 与 Elite / Boss 同一条设计原则。
 
 ## 关卡结束（胜 / 负）—— 由 Main 连接，Level 不反向找 Main
 signal finished(win: bool)
 ## 玩家请求重来本关（转发自 HUD）
 signal restart_requested()
 
-## 击杀星盗的掉落概率（实测：2000 次击杀掉落 373 次 = 18.65%，与配置一致）
-const DROP_CHANCE := 0.18
-## 每波星袭结束后额外刷新的道具数（每局固定 3 个）
-const WAVE_DROP := 1
-
 ## 单色连长上限：允许 2 连，禁止连续 ≥3 同色。
-## （第 1 波是刻意的一色到底 —— 教换甲的教学波，不受此限。）
+## （第 1 关第 1 波是刻意的一色到底 —— 教换甲的教学波，不受此限。）
 const MAX_RUN := 2
 
-## 每波「目标色」的只数（∈ 玩家战甲色，负责换甲增伤）。
-## 三波的只数 = 5 / (5+2) / (5+3) = 20 —— 这个 20 是 P0-1 满分（9800）的基数，
-## 动配额之前必须先把计分重算一遍。
-const WAVE_TARGETS := 5
+## 每波星袭结束后额外刷新的道具数（五关恒为 1，与 `StageCfg.wave_drop(s)` 同值）。
+## 保留本常量：既有自测（SelfTest 502-503）按它断言，删了会把门禁打红。
+const WAVE_DROP := 1
+
+## 关卡号 1..5 —— 由 Main 在 `add_child` **之前**注入（_ready 里就 _start，晚一步就打错关）
+var stage: int = 1
 
 var player: Player = null
 var boss: Boss = null
@@ -33,9 +37,11 @@ var score: int = 0
 var wave_text: String = "出 击"
 var paused: bool = false
 var _running: bool = false
-## 本局两波的「骚扰色」（∈ S'，玩家永远免疫不了，只负责走位承压）。
-## [0] 给第 2 波、[1] 给第 3 波，两波必定不同色 —— 第 3 波才凑齐四色。
+## 本局各波的「骚扰色」（∈ S'，玩家永远免疫不了，只负责走位承压）。
+## S' 恒为 2 色：偶数波取 [0]、奇数波取 [1]（见 `_harass_of`）。
 var _harass: Array[int] = []
+## 独有怪首登横幅是否已放过（每关只放一次，时长 2.2s 用于教学）
+var _uniq_intro := false
 
 
 func _ready() -> void:
@@ -54,7 +60,7 @@ func _ready() -> void:
 	hud = HUD.new()
 	hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(hud)
-	hud.bind(player)
+	hud.bind(player, stage)
 	hud.pause_toggled.connect(_on_pause_toggled)
 	hud.restart_requested.connect(_on_restart_requested)
 
@@ -72,55 +78,96 @@ func wait(t: float) -> void:
 
 # ---------------------------------------------------------------- 流程
 ## 空档 = 横幅显示时长 + 紧随的 wait()（两者叠加，玩家都还没动手）。
-## 重标定前合计 15.3 秒，节奏被切成四段碎觉；现在压到 7.6 秒：
-##   2.1 + 1.7 + 1.7 + 2.1 = 7.6
+##   首波前 1.2 + 0.9 = 2.1s；后续每波 1.0 + 0.7 = 1.7s；Boss 前 1.2 + 0.9 = 2.1s
+##   -> 合计 = 2.1 + (N-1)×1.7 + 2.1 = 7.6s(N=3) / 9.3s(N=4) / 11.0s(N=5)
 ## 横幅时长都留得比 wait 长一点 —— 让尾巴 0.3 秒压在下一波开头，
 ## 字还在淡出时敌已经进场，衔接不断档。
 func _run() -> void:
-	# 第 1 波点名：直接报出本波主色与对应的那件战甲，把「换甲」教在第一次遭遇上。
-	#（原来这行是操作提示 —— 那部分游戏说明里已有，横幅让给更关键的换甲教学。）
-	var t1: int = player.armors[1] if player.armors.size() > 1 else Game.WHITE
-	hud.show_banner("第 一 波 · %s 星袭" % Game.COLOR_CN[t1],
-		"换上【%s】—— 免疫同色弹幕，光刃伤害 +50%%" % Game.ARMOR_TITLE[t1], 1.2)
+	var n_waves := StageCfg.waves(stage)
+	var b0 := _wave_banner(1)
+	hud.show_banner(b0[0], b0[1], float(b0[2]))
 	await wait(0.9)
 	if not _running:
 		return
-
-	await _wave(1, 1.0)
-	if not _running:
-		return
-	_drop_wave()
-	hud.show_banner("第 二 波 · 双色交替", "同色光刃伤害 + 50% · 异色敌只能硬躲", 1.0)
-	await wait(0.7)
-	if not _running:
-		return
-
-	await _wave(2, 1.15, true)
-	if not _running:
-		return
-	_drop_wave()
-	hud.show_banner("第 三 波 · 先锋", "始祖将至 · 四色齐至", 1.0)
-	await wait(0.7)
-	if not _running:
-		return
-
-	await _wave(3, 1.3, true)
-	if not _running:
-		return
-	_drop_wave()
-	hud.show_banner("星盗始祖 · 现身", "护罩开启时 —— 唯有同色光刃可破，随时更换战甲", 1.2)
+	for i in n_waves:
+		var n := i + 1
+		if n > 1:
+			var bn := _wave_banner(n)
+			hud.show_banner(bn[0], bn[1], float(bn[2]))
+			await wait(0.7)
+			if not _running:
+				return
+		await _wave(n, StageCfg.wave_hp_scale(stage, n), StageCfg.wave_elite(stage, n))
+		if not _running:
+			return
+		_drop_wave()
+	var sub := "四色弹幕 + 属性护罩，破罩方能致胜" if StageCfg.boss_ward(stage) \
+		else "四色弹幕 · 始祖不展护罩，全力输出即可"
+	hud.show_banner(StageCfg.boss_full_name(stage), sub, 2.4)
 	await wait(0.9)
 	if not _running:
 		return
 	await _boss_fight()
 
 
+## 本波横幅：[标题, 副标题, 时长(秒)]
+## 第 1 波点名报出本波主色与对应的那件战甲，把「换甲」教在第一次遭遇上；
+## 独有怪首登那一波改报它的机制（2.2s，比常规 1.0s 长，留足教学时间）。
+func _wave_banner(n: int) -> Array[String]:
+	var out: Array[String] = []
+	if n <= 1:
+		var t1: int = player.armors[1] if player.armors.size() > 1 else Game.WHITE
+		out.append("%s · 第 一 波" % StageCfg.name_of(stage))
+		out.append("换上【%s】—— 免疫同色弹幕，光刃伤害 +50%%" % Game.ARMOR_TITLE[t1])
+		out.append("1.2")
+		return out
+	if StageCfg.wave_unique(stage, n) > 0 and not _uniq_intro:
+		_uniq_intro = true
+		var k := StageCfg.unique_kind_a(stage)
+		if StageCfg.wave_unique_a(stage, n) <= 0:
+			k = StageCfg.unique_kind_b(stage)
+		out.append(EnemyKind.short_cn(k))
+		out.append(_uniq_tip(k))
+		out.append("2.2")
+		return out
+	if StageCfg.wave_elite(stage, n):
+		out.append("第 %d 波 · 先锋" % n)
+		out.append("星盗战将至 · 换上同色战甲破其力场")
+		out.append("1.0")
+		return out
+	out.append("第 %d 波 · 星袭" % n)
+	out.append("同色光刃伤害 + 50% · 异色敌只能硬躲")
+	out.append("1.0")
+	return out
+
+
+## 独有怪首登的一句话机制提示（设计 §C 各条「唯一机制」）
+static func _uniq_tip(k: int) -> String:
+	match k:
+		EnemyKind.K.DISMANTLER:
+			return "死亡分裂两片 · 同色光刃可连带秒杀"
+		EnemyKind.K.DEFECTOR:
+			return "核心在两色间轮换 · 换色瞬间任意色 ×2.0"
+		EnemyKind.K.PHALANX:
+			return "三艘成墙齐射 · 墙缝规律平移，走缝可过"
+		EnemyKind.K.LAYER:
+			return "横穿布设引力雷 · 八秒自毁，压缩空间"
+		EnemyKind.K.SIPHON:
+			return "吸收一色并回血 · 换另一件战甲打疼它"
+		EnemyKind.K.MARTYR:
+			return "高速直冲 · 死或撞都爆出冲击环"
+		EnemyKind.K.PHASER:
+			return "每 2.6 秒无敌折跃 · 无敌期收手"
+		_:
+			return "星盗精锐 · 破其色防"
+
+
 # ---------------------------------------------------------------- HUD 数据
 ## 分数与波次文字统一走这里推送给 HUD —— HUD 不反向读 Level
-## 入参是「原始战果」，落账时统一乘难度计分倍率：
+## 入参是「原始战果」，落账时统一乘本关计分倍率：
 ## HUD 实时分 / 结算分 / 品阶判定 / 最高分存档因此同源同值。
 func _add_score(v: int) -> void:
-	score += int(roundf(float(v) * Game.score_multiplier()))
+	score += int(roundf(float(v) * StageCfg.score_multiplier(stage)))
 	if hud != null:
 		hud.set_score(score)
 
@@ -159,7 +206,7 @@ static func _complement(armors: Array[int]) -> Array[int]:
 	return out
 
 
-## 本局两波的骚扰色：S' 洗牌后 [0] 给第 2 波、[1] 给第 3 波（跨局有变化）
+## 本局各波的骚扰色：S' 洗牌后偶数波取 [0]、奇数波取 [1]（跨局有变化）
 func _plan_harass() -> void:
 	var comp := _complement(player.armors)
 	if comp.size() < 2:
@@ -168,48 +215,146 @@ func _plan_harass() -> void:
 	_harass = comp
 
 
-## 第 n 波的出怪色序（长度即本波只数）
-## [param armors] 玩家两件战甲色 S  [param h2] 第 2 波骚扰色  [param h3] 第 3 波骚扰色
-static func _wave_colors(n: int, armors: Array[int], h2: int, h3: int) -> Array[int]:
-	var a: int = armors[1] if armors.size() > 1 else Game.RED     # 主色（第 1 波整波都是它）
+## 第 n 波的骚扰色（S' 两色按波号轮换取用）
+static func _harass_of(n: int, h2: int, h3: int) -> int:
+	if n <= 0:
+		return -1
+	return h2 if n % 2 == 0 else h3
+
+
+## 本波「骚扰位」的格数 = 骚扰色喽啰 + 骚扰色配额的独有怪（列阵者 / 敷设者）
+static func _harass_slots(st: int, n: int) -> int:
+	var c := StageCfg.wave_harass(st, n)
+	var ka := StageCfg.unique_kind_a(st)
+	if ka != StageCfg.NO_KIND and EnemyKind.quota(ka) == EnemyKind.Q.HARASS:
+		c += StageCfg.wave_unique_a(st, n)
+	var kb := StageCfg.unique_kind_b(st)
+	if kb != StageCfg.NO_KIND and EnemyKind.quota(kb) == EnemyKind.Q.HARASS:
+		c += StageCfg.wave_unique_b(st, n)
+	return c
+
+
+## 本波「非骚扰位」里属于独有怪的格数（目标色配额 + 不占配额的中性怪）
+static func _uniq_s_count(st: int, n: int) -> int:
+	var c := 0
+	var ka := StageCfg.unique_kind_a(st)
+	if ka != StageCfg.NO_KIND and EnemyKind.quota(ka) != EnemyKind.Q.HARASS:
+		c += StageCfg.wave_unique_a(st, n)
+	var kb := StageCfg.unique_kind_b(st)
+	if kb != StageCfg.NO_KIND and EnemyKind.quota(kb) != EnemyKind.Q.HARASS:
+		c += StageCfg.wave_unique_b(st, n)
+	return c
+
+
+## 第 n 波的出怪色序（长度 = 本波格数 = `StageCfg.wave_slots(st, n)`）
+## [param armors] 玩家两件战甲色 S  [param h2] / [param h3] S' 两色
+## [param st] 关卡号（默认第 1 关 —— 5 / 7 / 8 只数就是第 1 关的三波）
+##
+## 独有怪**不参与配色决策**：它只是"占位格上的一个 kind 标记"，该格颜色仍由色序决定，
+## 且按设计 §E.3 占**非骚扰位的最后几格**（`_wave_kinds` 依此回填种类）。
+static func _wave_colors(n: int, armors: Array[int], h2: int, h3: int,
+		st: int = 1) -> Array[int]:
+	var a: int = armors[1] if armors.size() > 1 else Game.RED     # 主色
 	var b: int = armors[0] if armors.size() > 0 else Game.WHITE   # 副色
+	var h := _harass_of(n, h2, h3)
+	var n_s := StageCfg.wave_targets(st, n) + _uniq_s_count(st, n)
 	var seq: Array[int] = []
-	seq.resize(WAVE_TARGETS)
-	seq.fill(a)
-	if n <= 1:
-		return seq                    # 第 1 波：5 只全为主色，一色到底，教换甲
-	if n == 2:
-		seq = [a, b, a, b, a]        # 第 2 波：目标色严格交替（两色必换 4 次甲）
-		return _insert_harass(seq, h2, _harass_count(2))
-	# 第 3 波：目标色在两色间摆动，允许 2 连、禁止连续 ≥3 同色 —— 得自己判断何时换
-	var na := 3 if randf() < 0.5 else 2
-	seq = _alt_fill(a, b, na, WAVE_TARGETS - na, MAX_RUN)
-	return _insert_harass(seq, h3, _harass_count(3))
+	if n <= 1 and st <= 1:
+		# 第 1 关第 1 波：教学波，整波一色到底，禁连规则豁免
+		seq.resize(n_s)
+		seq.fill(a)
+		return seq
+	if n % 2 == 0:
+		# 偶数波：目标色严格交替（每只都得换甲）
+		for i in n_s:
+			seq.append(a if i % 2 == 0 else b)
+	else:
+		# 奇数波：目标色在两色间摆动，允许 2 连、禁止连续 ≥3 同色 —— 得自己判断何时换
+		var half := n_s / 2
+		var ca := half if randf() < 0.5 else n_s - half
+		seq = _alt_fill(a, b, ca, n_s - ca, MAX_RUN)
+	return _insert_harass(seq, h, _harass_slots(st, n))
 
 
-## 每重的骚扰色只数（第 1 重不设骚扰色）
-static func _harass_count(n: int) -> int:
-	if n == 2:
-		return 2
-	if n >= 3:
-		return 3
-	return 0
+## 本波每格的 kind —— 与 `_wave_colors` 的返回值**位置一一对应**。
+## 分流口径（设计 §E.3）：独有怪占「非骚扰位」的最后几格；
+## 骚扰色配额的独有怪（列阵者 / 敷设者）占「骚扰位」的最后几格。
+static func _wave_kinds(colors: Array[int], harass: int, n: int,
+		st: int = 1) -> Array[int]:
+	var s_uni: Array[int] = []
+	var h_uni: Array[int] = []
+	_push_uni(s_uni, h_uni, StageCfg.unique_kind_a(st), StageCfg.wave_unique_a(st, n))
+	_push_uni(s_uni, h_uni, StageCfg.unique_kind_b(st), StageCfg.wave_unique_b(st, n))
+	var n_s := StageCfg.wave_targets(st, n)
+	var n_h := StageCfg.wave_harass(st, n)
+	var kinds: Array[int] = []
+	var i_s := 0
+	var i_h := 0
+	for c in colors:
+		if c == harass:
+			if i_h < n_h or h_uni.is_empty():
+				kinds.append(EnemyKind.K.GRUNT)
+			else:
+				kinds.append(h_uni[clampi(i_h - n_h, 0, h_uni.size() - 1)])
+			i_h += 1
+		else:
+			if i_s < n_s or s_uni.is_empty():
+				kinds.append(EnemyKind.K.GRUNT)
+			else:
+				kinds.append(s_uni[clampi(i_s - n_s, 0, s_uni.size() - 1)])
+			i_s += 1
+	return kinds
 
 
-## 每重的出怪间隔（三重递进收紧：0.62 -> 0.55 -> 0.50）
-static func _wave_gap(n: int) -> float:
-	if n <= 1:
-		return 0.62
-	if n == 2:
-		return 0.55
-	return 0.50
+## 按配额把本关独有怪分流到「骚扰位尾」或「非骚扰位尾」
+static func _push_uni(s_uni: Array[int], h_uni: Array[int], k: int, cnt: int) -> void:
+	if k == StageCfg.NO_KIND or cnt <= 0:
+		return
+	var dst := h_uni if EnemyKind.quota(k) == EnemyKind.Q.HARASS else s_uni
+	for _i in cnt:
+		dst.append(k)
 
 
-## 每重目标色的运动模式池（第 1 重不出现 dive —— 开局就俯冲太凶）
-static func _wave_moves(n: int) -> Array[String]:
-	if n <= 1:
-		return ["straight", "sine"]
-	return ["straight", "sine", "dive"]
+## 列阵者组折叠（设计 §H.2-5 / 架构 §B.4）：
+## 1 组 3 艘在色序里**只占 1 格**，组内同色**豁免**「禁连续 ≥3 同色」
+## —— 整组是"一堵墙"，不是一个颜色序列。
+## 因此「禁 ≥3 同色」**必须**校验这条折叠后的序列：先展开成 3 艘再校验，
+## 一列阵就会被自己的组内同色判成违规。
+static func _fold_groups(colors: Array[int], kinds: Array[int]) -> Array[int]:
+	var out: Array[int] = []
+	for i in colors.size():
+		var k: int = kinds[i] if i < kinds.size() else EnemyKind.K.GRUNT
+		if k == EnemyKind.K.PHALANX and not out.is_empty() and out[-1] == colors[i]:
+			continue          # 把这一组并进前一格 —— 组内同色不计连长
+		out.append(colors[i])
+	return out
+
+
+## 一格要出几艘（列阵者 1 格 = 1 组 3 艘成墙；其余 1 艘）
+static func _ships_of(kind: int) -> int:
+	return 3 if kind == EnemyKind.K.PHALANX else 1
+
+
+## 组内第 i 艘的 y 偏移（竖墙，间距 130px）
+static func _ship_off(i: int, ships: int) -> float:
+	if ships <= 1:
+		return 0.0
+	return (float(i) - (float(ships) - 1.0) * 0.5) * 130.0
+
+
+## 每波目标色的运动模式池（第 1 波不出现 dive —— 开局就俯冲太凶）
+static func _wave_moves(n: int, st: int = 1) -> Array[String]:
+	var out: Array[String] = []
+	out.append("straight")
+	out.append("sine")
+	if n > 1:
+		out.append("dive")
+	return out
+
+
+## 每波出怪间隔（读 `StageCfg`，不再按波号写死）
+static func _wave_gap(n: int, st: int = 1) -> float:
+	return StageCfg.wave_gap(st, n)
 
 
 ## 序列里最长的一段同色连长
@@ -292,32 +437,35 @@ static func _insert_harass(seq: Array[int], h: int, count: int) -> Array[int]:
 	return seq
 
 
-## [param elite] 本波是否以【星盗战将】压轴（第 2 / 第 3 波各一只）
+## [param elite] 本波是否以【星盗战将】压轴
 func _wave(n: int, scale: float, elite := false) -> void:
 	_set_wave("第 %d 波 · 星袭" % n)
 	if _harass.size() < 2:
 		_plan_harass()
-	var harass := -1
-	if n == 2:
-		harass = _harass[0]
-	elif n >= 3:
-		harass = _harass[1]
-	var seq := _wave_colors(n, player.armors, _harass[0], _harass[1])
-	var pats := _wave_moves(n)
-	var gap := _wave_gap(n)
-	for c in seq:
+	var harass := _harass_of(n, _harass[0], _harass[1])
+	var colors := _wave_colors(n, player.armors, _harass[0], _harass[1], stage)
+	var kinds := _wave_kinds(colors, harass, n, stage)
+	# 列阵组折叠：展开成 3 艘之前先校验（组内豁免），否则一列阵就会被判违规。
+	# 第 1 关第 1 波是教学波，整波一色到底，不在约束内。
+	if (n > 1 or stage > 1) and _max_run(_fold_groups(colors, kinds)) > MAX_RUN:
+		push_warning("Level: 第 %d 关第 %d 波色序出现连续 %d 同色（已折叠列阵组）" % [
+			stage, n, _max_run(_fold_groups(colors, kinds))
+		])
+	var pats := _wave_moves(n, stage)
+	var gap := _wave_gap(n, stage)
+	for i in colors.size():
 		if not _running:
 			return
-		_spawn_enemy(scale, c, harass, pats)
+		_spawn_slot(scale, colors[i], kinds[i], harass, pats)
 		await wait(gap)
 	if elite:
 		await wait(0.5)
 		if not _running:
 			return
 		_spawn_elite(scale)
-	# 等待清场。精英是硬性门槛 —— 星盗可以剩最后一只不等，战将没斩就别想进下一波。
-	# 上限放宽到 26 秒：斩一只战将约 8~12 秒，14 秒的窗口会把它卡在半路。
-	var limit := 26.0 if elite else 14.0
+	# 等待清场。战将是硬性门槛 —— 星盗可以剩最后一只不等，战将没斩就别想进下一波。
+	# 上限按 `StageCfg.clear_guard(stage, elite)` 取：各关只数不同，写死会卡在半路。
+	var limit := StageCfg.clear_guard(stage, elite)
 	var guard := 0.0
 	while _running and guard < limit:
 		await wait(0.3)
@@ -326,28 +474,42 @@ func _wave(n: int, scale: float, elite := false) -> void:
 			break
 
 
-## [param c] 出怪色（由 _wave_colors 排定）
+## 出怪唯一入口 —— 一律走 `Spawner.enemy(...)`（world 显式注入，禁用 get_parent）。
+## [param c] 本格色（由 `_wave_colors` 排定）
+## [param kind] 本格的星盗种类（`_wave_kinds` 排定；GRUNT = 通用喽啰）
 ## [param harass] 本波骚扰色；c == harass 时强制 hover（远驻放弹、不追击），
-##                harass < 0 表示本波没有骚扰色（第 1 波）
+##                harass < 0 表示本波没有骚扰色
 ## [param pats] 本波目标色的运动模式池（骚扰色不走这里）
-func _spawn_enemy(scale: float, c: int, harass: int, pats: Array[String]) -> void:
+func _spawn_slot(scale: float, c: int, kind: int, harass: int,
+		pats: Array[String]) -> void:
 	var pat := "hover"
 	if c != harass:
 		pat = pats[randi() % pats.size()]
 	var y := randf() * (Game.VIEW_H - 180.0) + 90.0
-	var e := Enemy.new()
-	e.world = self
-	add_child(e)
-	e.player_ref = player
-	e.setup(c, pat, y, scale)
-	e.killed.connect(_on_enemy_killed)
+	var ships := _ships_of(kind)
+	for i in ships:
+		var yy := clampf(y + _ship_off(i, ships), 90.0, Game.VIEW_H - 90.0)
+		var e := Spawner.enemy(self, kind, c, pat, yy, scale, stage)
+		if e == null:
+			return
+		e.player_ref = player
+		# 分值由本文件按种类钉死（设计 §G.2）—— 满分表 `_MAX` 就是按这张表算的
+		e.score = EnemyKind.score_of(kind)
+		e.killed.connect(_on_enemy_killed)
 
 
-## 场上还有几只需要清掉的星盗（战将另算，见 _elite_alive）。
+## 通用星盗的便捷入口（保留原签名：既有自测调用点零改动）
+func _spawn_enemy(scale: float, c: int, harass: int, pats: Array[String]) -> void:
+	_spawn_slot(scale, c, EnemyKind.K.GRUNT, harass, pats)
+
+
+## 场上还有几只需要清掉的星盗（战将另算，见 `_elite_alive`）。
+## `no_block_clear` 单位（拆解者小片 / 引力雷 / 增援）**不计** —— 它们不阻塞清场，
+## 只靠自身兜底回收；算进去会把清场一路拖到 guard 上限。
 func _enemy_count() -> int:
 	var n := 0
 	for ch in get_children():
-		if ch is Enemy:
+		if ch is Enemy and not (ch as Enemy).no_block_clear:
 			n += 1
 	return n
 
@@ -363,6 +525,7 @@ func _elite_alive() -> bool:
 ## 压轴：星盗战将。力场色由 Elite 自己从玩家战甲里抽 —— 保证一定破得了
 func _spawn_elite(scale: float) -> void:
 	var e := Elite.new()
+	e.stage = stage                     # ★ add_child 之前注入（与 Spawner.enemy 同一口径）
 	e.world = self
 	add_child(e)
 	e.player_ref = player
@@ -383,24 +546,47 @@ func _on_elite_killed(pos: Vector2, c: int, sc: int) -> void:
 func _on_enemy_killed(pos: Vector2, c: int, sc: int) -> void:
 	_add_score(sc)
 	Fx.pop(self, pos, "+%d" % sc, Game.COLOR_MAIN[c], 18)
-	if randf() < DROP_CHANCE:
+	if randf() < StageCfg.drop_chance(stage):
 		Pickup.spawn(self, Pickup.random_kind(), pos)
 
 
-## 每波星袭结束：额外刷新 WAVE_DROP 个道具，散落在场景右段，逼玩家挪过去捡
+## 每波星袭结束：额外刷新 `StageCfg.wave_drop(stage)` 个道具，散落在场景右段，
+## 逼玩家挪过去捡
 func _drop_wave() -> void:
-	for i in WAVE_DROP:
+	for i in StageCfg.wave_drop(stage):
 		var x := randf() * 540.0 + 460.0
 		var y := randf() * (Game.VIEW_H - 240.0) + 120.0
 		Pickup.spawn(self, Pickup.random_kind(), Vector2(x, y))
 
 
 # ---------------------------------------------------------------- Boss
+## 旗舰实例：按关号探测子类，探测不到就走基类。结论（ADR-3 判据实测后已定）：
+##   · **L4 拆了** —— `Boss4.gd`：子核心是有状态的状态机（免伤 / 分裂 / 共享 / 召唤 /
+##     暴露期），必须持有自己的状态，塞进基类会长出第二个状态机。
+##   · **L5 不拆** —— `Boss.gd` 752 行里 L5 专属分支只有 1 行（列数判据 `stage >= 5`），
+##     离 ADR-3 的反转阈值（独有分支 > 60 行）差两个数量级；四相重构 / 每相独立池 /
+##     护罩轮转全靠 `BossCfg._L5_P1.._L5_P4` + `StageCfg.phase_marks()` 数据驱动，
+##     拆个空壳子类反而把数据驱动倒退回代码分支。
+## 探测机制**保留**：零成本的前向兼容 —— 日后 `Boss5.gd` 若出现，此处自动接上，无需改动。
+static func _make_boss(st: int) -> Boss:
+	var path := "res://scripts/entities/Boss%d.gd" % st
+	if st >= 4 and ResourceLoader.exists(path):
+		var sc: Variant = load(path)
+		if sc is Script:
+			var made: Variant = (sc as Script).new()
+			if made is Boss:
+				return made as Boss
+	return Boss.new()
+
+
 func _boss_fight() -> void:
-	_set_wave("星盗始祖")
+	_set_wave(StageCfg.boss_name(stage))
 	bg.scroll_speed = 22.0
-	boss = Boss.new()
+	boss = _make_boss(stage)
 	boss.world = self
+	boss.stage = stage                                   # ★ 必须在 add_child 之前
+	boss.title = StageCfg.boss_full_name(stage)
+	boss.boss_name = StageCfg.boss_name(stage)
 	add_child(boss)
 	boss.player_ref = player
 	boss.player_armors = player.armors
@@ -409,13 +595,14 @@ func _boss_fight() -> void:
 	boss.enrage_started.connect(_on_enrage)
 	boss.boss_died.connect(_on_boss_died)
 	hud.bind_boss(boss)
-	var sub := "四色弹幕 + 属性护罩，破罩方能致胜" if Game.boss_ward() \
+	var sub := "四色弹幕 + 属性护罩，破罩方能致胜" if StageCfg.boss_ward(stage) \
 		else "四色弹幕 · 始祖不展护罩，全力输出即可"
-	hud.show_banner("星 盗 始 祖", sub, 2.4)
+	hud.show_banner(StageCfg.boss_full_name(stage), sub, 2.4)
 
 
 func _on_enrage() -> void:
-	hud.show_banner("狂 暴", "始祖周身泛起血光 · 四色螺旋弹幕", 1.8)
+	hud.show_banner("狂 暴", "%s 周身泛起血光 · 攻势全面升级" % StageCfg.boss_name(stage),
+		1.8)
 
 
 func _on_boss_phase(p: int) -> void:
@@ -446,7 +633,7 @@ func _on_player_died() -> void:
 	_finish(false)
 
 
-## 玩家已陨落：清弹、撤敌、让始祖收手。
+## 玩家已陨落：清弹、撤敌、让旗舰收手。
 ## 不做这步的话，接下来这 1.5 秒里 Boss 仍会按套路开火，而 player_ref 指向的
 ## 玩家节点已经被 queue_free —— 把「已释放对象」赋给弹幕的 target 会直接报
 ## "Invalid assignment ... with value of type 'previously freed'"。
@@ -473,11 +660,13 @@ func _finish(win: bool) -> void:
 	Game.result_score = score
 	Game.result_hp = player.hp if (player != null and is_instance_valid(player)) else 0
 	# 先记下本局之前的最好成绩 —— 结算界面要拿它显示「历史最高」，
-	# 而存档一旦刷新它就查不到了。
-	Game.result_prev_high = Game.highscore_for(Game.difficulty)
+	# 而存档一旦刷新它就查不到了。关卡纪录一律走 progress.json（"L1".."L5"）。
+	Game.result_prev_high = Game.stage_highscore(stage)
 	Game.result_is_new_high = score > Game.result_prev_high
+	# 通关 -> 解锁下一关（**先解锁再存档**，结算界面的「解锁行」才读得到）
+	Game.unlock_after(stage, win)
 	if Game.result_is_new_high:
-		Game.save_highscore(Game.difficulty, score, Game.picked_armors,
-			Game.rank_of(score), win)
+		# 注意：这里**不传 win** —— 通关与否由 `unlocked` 承载（见 Game.save_stage 注释）。
+		# 传进去的话，一局「输了但分数更高」会把该关的通关事实改成没通关。
+		Game.save_stage(stage, score, Game.picked_armors)
 	finished.emit(win)
-
