@@ -218,6 +218,19 @@ func _draw() -> void:
 			DrawUtil.txt(self, "（仅光子护盾状态下生效）", Vector2(444.0, 63.0), 13,
 				Color(0.48, 0.52, 0.62))
 
+		# 电浆剑甲 · 贯穿激光能量（攒满即自动打出，条子不会停在满值上）
+		# 排在护盾条（52~66）与过热条（84）之间：三条互不叠印。
+		var ck := float(p.charge) / float(PlayerCfg.CHARGE_MAX)
+		var ckc: Color = Game.COLOR_MAIN[Game.RED] if p.color == Game.RED \
+			else Color(0.55, 0.60, 0.72, 0.38)
+		_bar(26.0, 69.0, 320.0, 10.0, ck, ckc)
+		DrawUtil.txt(self, "能量 %d/%d" % [p.charge, PlayerCfg.CHARGE_MAX],
+			Vector2(354.0, 79.0), 13,
+			Game.COLOR_MAIN[Game.RED] if p.color == Game.RED else Color(0.5, 0.55, 0.66))
+		if p.color != Game.RED:
+			DrawUtil.txt(self, "（仅电浆剑甲状态下充能）", Vector2(444.0, 79.0), 13,
+				Color(0.48, 0.52, 0.62))
+
 		# 引力束过热（引力束甲专属：满值即停手散热）
 		if p.color == Game.YELLOW or p.heat > 0.0:
 			var hr := clampf(p.heat / PlayerCfg.HEAT_MAX, 0.0, 1.0)

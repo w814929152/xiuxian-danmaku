@@ -34,6 +34,9 @@ static func _build_sections() -> Array[Dictionary]:
 		"h": "战 甲",
 		"l": [
 			"电浆剑甲 —— 免疫电浆弹 · 双排光刃（%d × 2）" % PlayerCfg.SWORD_DMG_RED,
+			"  吸收电浆弹 -> 能量 +%d（只在穿着电浆剑甲时充能）" % PlayerCfg.CHARGE_GAIN,
+			"  能量满 %d 自动打出 %.0f 倍贯穿激光，横贯全屏"
+				% [PlayerCfg.CHARGE_MAX, PlayerCfg.LANCE_MUL],
 			"寒霜疾甲 —— 免疫寒霜弹 · 身法提速 +50%",
 			"光子盾甲 —— 免疫光子弹 · 护盾开局为 0，吸收光子弹 +%d" % PlayerCfg.SHIELD_GAIN,
 			"光子护盾上限 %d，不再自动回复（只在穿着光子盾甲时充能）" % PlayerCfg.SHIELD_MAX,

@@ -13,6 +13,9 @@ signal player_died()
 var hp: int = PlayerCfg.MAX_HP
 ## 光子护盾：开局为 0，靠吸收光子弹充能（上限 PlayerCfg.SHIELD_MAX，不自动回复）
 var shield: int = 0
+## 电浆剑甲 · 贯穿激光能量：开局为 0，靠吸收电浆弹充能
+## （上限 PlayerCfg.CHARGE_MAX，攒满即自动打出并清零，所以**不会停在满值上**）
+var charge: int = 0
 ## 过热值：只在使用引力束甲（黄）出束时累积
 var heat: float = 0.0
 ## 刃影模块层数 = 额外弹道排数（电浆基准双排，其余基准单排，引力基准一道束）
@@ -94,6 +97,12 @@ func sword_damage() -> int:
 ## 光刃尺寸系数：增幅核心层数越多，剑身越大（碰撞体同步放大）
 func sword_size() -> float:
 	return PlayerCfg.atk_vis(atk_up)
+
+
+## 贯穿激光的单发伤害 = 单发光刃 × PlayerCfg.LANCE_MUL（受增幅核心影响）。
+## 相对**单发**而不是双排齐射：激光只有一道，按齐射算就成了 6 倍。
+func lance_damage() -> int:
+	return maxi(1, int(roundf(float(sword_damage()) * PlayerCfg.LANCE_MUL)))
 
 
 ## 引力束每秒伤害（受增幅核心影响）
@@ -317,6 +326,11 @@ func take_hit(c: int, dmg: int) -> bool:
 	# 少了 color 会让任意战甲都充能。
 	if c == Game.WHITE and color == Game.WHITE:
 		_gain_shield()
+	# 电浆剑甲 · 充能。与光子护盾同制式：排在力场罩早退**之前** ——
+	# 力场罩的语义是「弹幕穿过」，但吞下的电浆弹仍要转成能量。
+	# 两条守卫同样缺一不可：少了 c 会让任意颜色都充能，少了 color 会让任意战甲都充能。
+	if c == Game.RED and color == Game.RED:
+		_gain_charge()
 	# 力场罩：六秒内免疫一切（放在扣血之前，所以既不扣血也不消耗护盾）
 	if invinc > 0.0:
 		_immune = 0.22
@@ -359,6 +373,36 @@ func take_hit(c: int, dmg: int) -> bool:
 		hp = 0
 		_die()
 	return true
+
+
+## 电浆剑甲 · 能量充能（唯一入口）。
+## 攒满即**自动打出**贯穿激光并清零 —— 所以能量条永远不会停在满值上，
+## 玩家看到的是「80 -> 打出 -> 0」而不是「100 等着谁来按一下」。
+## 充能判定必须排在力场罩早退之前（力场罩期间吞弹也攒），
+## 抽成方法是为了让力场罩路径与同色吸收路径共用同一份实现，
+## 若两条分支各写一遍，一发弹就会充两次（+20 变 +40）。
+func _gain_charge() -> void:
+	var before := charge
+	charge = mini(PlayerCfg.CHARGE_MAX, charge + PlayerCfg.CHARGE_GAIN)
+	stat_changed.emit()
+	if charge >= PlayerCfg.CHARGE_MAX:
+		charge = 0
+		_fire_lance()
+		return
+	Fx.pop(world, position + Vector2(0.0, -32.0), "能量 +%d" % (charge - before),
+		Game.COLOR_GLOW[Game.RED], 16, 0.7)
+
+
+## 打出贯穿激光：一道自玩家身前横贯到屏幕右缘的光柱，命中其上**所有**目标。
+## 光口冲击用的是细环（Fx.ring）而不是实心盘（Fx.shock）：光柱本体才是主角，
+## 一个 170px 的红色实心盘会把整条激光糊住 —— 实测过，别改回去。
+func _fire_lance() -> void:
+	if world == null:
+		return
+	Lance.spawn(world, Game.RED, position, lance_damage())
+	Fx.pop(world, position + Vector2(0.0, -46.0), "贯穿激光",
+		Game.COLOR_GLOW[Game.RED], 20, 0.9)
+	Fx.ring(world, position, Game.COLOR_MAIN[Game.RED], 24.0, 96.0, 0.30, 6.0)
 
 
 ## 光子盾甲 · 护盾充能（唯一入口；自动回复已取消）。
@@ -474,6 +518,12 @@ func _draw() -> void:
 		draw_arc(Vector2.ZERO, 30.0, -PI * 0.5, -PI * 0.5 + TAU * sr, 40,
 			Color(1.0, 1.0, 1.0, 0.85), 4.0, true)
 		draw_circle(Vector2.ZERO, 30.0, Color(0.95, 0.98, 1.0, 0.06))
+
+	# 电浆剑甲：能量环（攒满即自动打出，所以这圈最多读到 80%）
+	if c == Game.RED and charge > 0:
+		var cr := float(charge) / float(PlayerCfg.CHARGE_MAX)
+		draw_arc(Vector2.ZERO, 34.0, -PI * 0.5, -PI * 0.5 + TAU * cr, 40,
+			Game.COLOR_GLOW[Game.RED], 4.0, true)
 
 	# 绕身光刃
 	for i in 3:

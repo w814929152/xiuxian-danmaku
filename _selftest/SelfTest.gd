@@ -1,6 +1,8 @@
 extends Node2D
 ## 自动化冒烟测试（headless 运行用，验证完毕即删除）
 ## 覆盖：四色免疫 / 护盾充能（开局 0 · 吸弹 +10 · 上限 20 · 不自动回复）/
+## 电浆剑甲充能（吸弹 +20 · 满 100 自动打出 3 倍贯穿激光）/
+## 闪避 /
 ## 移速加成 / 关卡生成 / Boss 三阶段 / 护罩 / UI 全流程
 ## 追加：引力（黄）免疫 / 引力束过热（+20 每秒 · 100 封顶 · 停手 0.5 秒后 -30 每秒）/ 引力弹 -30 / 引力束持续伤害
 
@@ -18,6 +20,7 @@ func _ready() -> void:
 	await _frames(2)
 	await _test_ui_flow()
 	await _test_player()
+	await _test_red_charge()   # 电浆剑甲：充能 -> 攒满自动贯穿激光
 	await _test_dodge()
 	await _test_yellow()
 	await _test_pickup()
@@ -53,6 +56,21 @@ func _finish_all() -> void:
 func _frames(n: int) -> void:
 	for _i in n:
 		await get_tree().process_frame
+
+
+## 等场上所有贯穿激光走完（结算 -> 收束 -> 归还对象池）。
+## 一律**轮询等状态**而不是数帧：headless 的物理步进很稀疏（一道 0.3 秒的光柱
+## 可能跨越好几个 idle 帧才结算），数帧必翻车。
+func _drain_lances() -> void:
+	for _i in 200:
+		var pending := false
+		for ch in get_children():
+			if ch is Lance:
+				pending = true
+				break
+		if not pending:
+			return
+		await get_tree().physics_frame
 
 
 func _ck(cond: bool, msg: String) -> void:
@@ -341,6 +359,156 @@ func _test_player() -> void:
 ##   ③ 闪避期间撞上来的弹幕**不消失、继续飞** —— take_hit 返回 false。
 ## 另外：闪避只有 0.5 秒，headless 帧率抖动极大，一律**轮询状态**等它结束，
 ##      绝不靠数帧去凑时间。
+# ------------------------------------------------------------ 电浆剑甲 · 贯穿激光
+func _test_red_charge() -> void:
+	print("------ red charge (电浆剑甲 · 贯穿激光) ------")
+	_ck(PlayerCfg.CHARGE_GAIN == 20, "单次充能常量 = 20")
+	_ck(PlayerCfg.CHARGE_MAX == 100, "能量上限常量 = 100")
+	_ck(is_equal_approx(PlayerCfg.LANCE_MUL, 3.0), "激光倍率常量 = 3.0")
+	_ck(PlayerCfg.CHARGE_MAX % PlayerCfg.CHARGE_GAIN == 0,
+		"上限是充能量的整数倍（第 %d 发必定触发，不会卡在差一点点）"
+			% (PlayerCfg.CHARGE_MAX / PlayerCfg.CHARGE_GAIN))
+
+	var p := Player.new()
+	p.world = self
+	add_child(p)
+	p.armors = [Game.RED, Game.BLUE]
+	p.armor_idx = 0
+	await _frames(2)
+	_ck(p.color == Game.RED, "充能用例：穿上电浆剑甲(红)")
+	_ck(p.charge == 0, "能量开局为 0")
+
+	# ---------- ① 逐发充能 20 -> 40 -> 60 -> 80 ----------
+	var hp0 := p.hp
+	p._invuln = 0.0
+	_clear_pops()
+	_ck(p.take_hit(Game.RED, 10) == true, "① 红甲吸收红弹（弹幕消失）")
+	_ck(p.charge == 20, "① 吸收一枚 -> 能量 0 -> 20（绝对值）")
+	_ck(p.charge != 0, "① 充能确实发生（常量被改小这条不绿）")
+	_ck(p.hp == hp0, "① 吸收同色弹不掉血")
+	_ck(_pop_texts().has("能量 +20"), "① 充能飘字 -> 「能量 +20」")
+	for expect in [40, 60, 80]:
+		p._invuln = 0.0
+		p.take_hit(Game.RED, 10)
+		_ck(p.charge == expect, "① 累积充能 -> 能量 %d" % expect)
+
+	# ---------- ② 攒满即**自动**打出并清零（不等玩家按键）----------
+	p._invuln = 0.0
+	_clear_pops()
+	p.take_hit(Game.RED, 10)
+	_ck(p.charge == 0, "② 攒满自动打出 -> 能量清零（不停在 100 上）")
+	_ck(_pop_texts().has("贯穿激光"), "② 打出瞬间飘「贯穿激光」")
+
+	# ---------- ③ 只在穿着电浆剑甲时充能 ----------
+	p.do_swap()
+	_ck(p.color == Game.BLUE, "③ 换甲 -> 寒霜(蓝)")
+	p._invuln = 0.0        # do_swap() 自带 0.18 秒换甲无敌帧，必须在它**之后**清零
+	p.charge = 0
+	p.take_hit(Game.RED, 10)
+	_ck(p.charge == 0, "③ 非电浆剑甲吃红弹**不**充能（能量仍为 0）")
+	# 白甲吸白弹走的是护盾通道，不得顺带把能量也充上
+	p.armors = [Game.WHITE, Game.RED]
+	p.armor_idx = 0
+	p.charge = 0
+	p._invuln = 0.0
+	p.take_hit(Game.WHITE, 10)
+	_ck(p.charge == 0, "③ 白甲吸白弹只充护盾，不充激光能量")
+
+	# ---------- ④ 力场罩期间吞红弹照充，且一发只充一次 ----------
+	p.armors = [Game.RED, Game.BLUE]
+	p.armor_idx = 0
+	p.charge = 0
+	p._invuln = 0.0
+	p.invinc = 5.0
+	var ff := p.take_hit(Game.RED, 10)
+	_ck(p.charge == 20, "④ 力场罩期间吞红弹 -> 照常充能 20")
+	_ck(p.charge != 40, "④ 一发弹只充一次（力场罩分支与同色吸收分支不重复充能）")
+	_ck(ff == false, "④ 充能不改语义：力场罩下弹幕仍穿过（返回 false）")
+	p.invinc = 0.0
+
+	# ---------- ⑤ 闪避期间不充能（闪避早退排在充能之前）----------
+	p._invuln = 0.0
+	p.charge = 0
+	p._dodge = PlayerCfg.DODGE_TIME
+	p.take_hit(Game.RED, 10)
+	_ck(p.charge == 0, "⑤ 闪避期间吞红弹不充能（早退发生在充能之前）")
+	p._dodge = 0.0
+
+	# ---------- ⑥ 伤害 = 单发光刃 × 3（走 Player.lance_damage 一处派生）----------
+	_ck(p.lance_damage() == 24, "⑥ 激光伤害 = 单发光刃 8 × 3 = 24（绝对值）")
+	p.atk_up = PlayerCfg.ATK_MAX
+	_ck(p.lance_damage() == 33, "⑥ 满叠增幅核心 -> 11 × 3 = 33（倍率随增幅生效）")
+	p.atk_up = 0
+
+	# ---------- ⑦ 真链路：充到满 -> 自动打出 -> 贯穿同一排上的两个目标 ----------
+	# 用**蓝色**敌人当靶：红光柱对它属异色，不吃「同源共振 +50%」，
+	# 掉血量才等于 lance_damage() 本身，断言才敢写绝对值。
+	#
+	# ⚠️ 先排空在飞的光柱：② 打出的那道还挂在树上（headless 物理步进很稀疏，
+	#    它要等两个物理帧才结算），不排空的话会先一步打到刚建好的靶子上，
+	#    读数变成 34 -> 10。这里一律**轮询等状态**而不是数帧 —— 数帧在
+	#    headless 下根本不可靠（帧率抖动可达一个数量级）。
+	await _drain_lances()
+	p.position = Vector2(300.0, 360.0)
+	var e1 := Enemy.new()
+	e1.world = self
+	add_child(e1)
+	e1.setup(Game.BLUE, "hover", 360.0, 1.0)
+	e1.position = Vector2(600.0, 360.0)
+	var e2 := Enemy.new()
+	e2.world = self
+	add_child(e2)
+	e2.setup(Game.BLUE, "hover", 360.0, 1.0)
+	e2.position = Vector2(880.0, 360.0)
+	# 对照组：站在光柱**外**（纵向差 160px）的第三个目标必须毫发无损 ——
+	# 这条守的是 LANCE_HALF_H 不被悄悄放大成「全屏 AOE」。
+	var e3 := Enemy.new()
+	e3.world = self
+	add_child(e3)
+	e3.setup(Game.BLUE, "hover", 520.0, 1.0)
+	e3.position = Vector2(740.0, 520.0)
+	await _frames(2)
+	var hp1 := e1.hp
+	var hp2 := e2.hp
+	var hp3 := e3.hp
+	_ck(hp1 == 34 and hp2 == 34, "⑦ 两个靶子满血入场（%d / %d）" % [hp1, hp2])
+	_ck(hp1 > p.lance_damage() and hp2 > p.lance_damage(),
+		"⑦ 靶子血量足以承住一击（不掉到 0，掉血量才读得准）")
+	# 走真实充能链路：差一发满 -> 吞下第五颗电浆弹 -> 自动打出
+	p.charge = PlayerCfg.CHARGE_MAX - PlayerCfg.CHARGE_GAIN
+	p._invuln = 0.0
+	_clear_pops()
+	p.take_hit(Game.RED, 10)
+	_ck(p.charge == 0, "⑦ 第五颗电浆弹 -> 自动打出并清零")
+	_ck(_pop_texts().has("贯穿激光"), "⑦ 真链路同样飘「贯穿激光」")
+	await _drain_lances()
+	var d1 := hp1 - (e1.hp if is_instance_valid(e1) else 0)
+	var d2 := hp2 - (e2.hp if is_instance_valid(e2) else 0)
+	_ck(d1 == 24, "⑦ 近端目标掉血 24（实测 %d）" % d1)
+	_ck(d2 == 24, "⑦ 远端目标同样掉血 24 -> 贯穿未被近端吃掉（实测 %d）" % d2)
+	var d3 := hp3 - (e3.hp if is_instance_valid(e3) else 0)
+	_ck(d3 == 0, "⑦ 光柱外的目标毫发无损（只打这一排，实测掉 %d）" % d3)
+
+	# ---------- ⑧ 作战手册的激光条目由配置现拼（不写死数值）----------
+	var red_line := ""
+	for sec in HelpScreen._build_sections():
+		for line in sec["l"]:
+			var s := str(line)
+			if s.contains("贯穿激光"):
+				red_line = s
+	_ck(red_line.contains("%d" % PlayerCfg.CHARGE_MAX),
+		"⑧ 手册写了能量上限 %d（改配置文案跟着变，实测「%s」）"
+			% [PlayerCfg.CHARGE_MAX, red_line])
+	_ck(red_line.contains("%.0f 倍" % PlayerCfg.LANCE_MUL),
+		"⑧ 手册写了 %.0f 倍伤害（实测「%s」）" % [PlayerCfg.LANCE_MUL, red_line])
+
+	for ch in get_children():
+		if ch is Enemy:
+			(ch as Enemy).queue_free()
+	p.queue_free()
+	await _frames(3)
+
+
 func _test_dodge() -> void:
 	print("------ dodge (寒霜疾甲) ------")
 	var p := Player.new()
