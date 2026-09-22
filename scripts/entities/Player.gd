@@ -242,10 +242,14 @@ func _beam_off() -> void:
 
 
 ## 多道引力束在竖直方向均匀铺开：1 道居中，2 道上下，3 道加中线……
+## 间距随 beam_width() 同步放大 —— 增幅核心会把光柱加粗到约 1.88 倍，
+## 固定间距的话粗束会严重重叠、糊成一坨，数不出道数。
+## 基准值对着**视觉宽度**定（不是判定高度），依据与取舍见 PlayerCfg.BEAM_GAP。
+## minf 的那一半是跨度过大的兜底：道数若将来提高，总跨度不会撑出屏幕。
 func _beam_y(i: int, n: int) -> float:
 	if n <= 1:
 		return 0.0
-	var gap := minf(46.0, 200.0 / float(n - 1))
+	var gap := minf(PlayerCfg.BEAM_GAP * beam_width(), 200.0 / float(n - 1))
 	return (float(i) - (float(n) - 1.0) * 0.5) * gap
 
 
