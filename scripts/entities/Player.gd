@@ -1,59 +1,59 @@
 class_name Player
 extends Area2D
-## 玩家 · 修士
-## 两件道袍随时按【空格】切换，道袍决定：免疫色 / 攻击形态 / 被动
+## 玩家 · 星舰战士
+## 两件战甲随时按【空格】切换，战甲决定：免疫色 / 攻击形态 / 被动
 
 signal stat_changed()
-signal robe_changed(c: int)
+signal armor_changed(c: int)
 signal player_died()
 
 const MAX_HP := 100
 const SHIELD_MAX := 10
 const BASE_SPEED := 340.0
-const BLUE_MUL := 1.5          # 玄冰遁法：移速 +50%
+const BLUE_MUL := 1.5          # 寒霜疾甲：移速 +50%
 const HIT_R := 11.0
 const FIRE_CD := 0.105
 const SWAP_CD := 0.20
-const SHIELD_REGEN := 10.0     # 十息（10 秒）无伤 -> 罡气护盾回满
+const SHIELD_REGEN := 10.0     # 十息（10 秒）无伤 -> 护盾回满
 const INVULN := 0.85
 
-# ---------------------------------------------------------------- 戊土符袍 · 符光过热
-const BEAM_DPS := 120.0        # 符光每秒伤害
-const HEAT_MAX := 100.0        # 过热值上限，满则无法出光
-const HEAT_RISE := 20.0        # 出光时每秒累积
+# ---------------------------------------------------------------- 引力束甲 · 引力束过热
+const BEAM_DPS := 120.0        # 引力束每秒伤害
+const HEAT_MAX := 100.0        # 过热值上限，满则无法出束
+const HEAT_RISE := 20.0        # 出束时每秒累积
 const HEAT_COOL_DELAY := 0.5   # 停火多久后开始散热
 const HEAT_COOL := 30.0        # 散热速度（每秒）
-const HEAT_VENT := 30.0        # 触到戊土（黄）弹时立刻散去
-## 解锁阈值：过热后必须散到这个数值以下才能重新出光。
+const HEAT_VENT := 30.0        # 触到引力（黄）弹时立刻散去
+## 解锁阈值：过热后必须散到这个数值以下才能重新出束。
 ## 不加这道闸门的话，按住不放会卡在「锁 0.5 秒 -> 亮 1 帧 -> 再锁」的抖动里
-## （升温 20/s 远快于每帧的散热量，占空比只剩约 5%），符光等于废掉。
+## （升温 20/s 远快于每帧的散热量，占空比只剩约 5%），引力束等于废掉。
 const HEAT_REARM := 60.0
 
 # ---------------------------------------------------------------- 道具增益
-const HEAL_AMOUNT := 20       # 回春丹：回复元神
-const MULTI_MAX := 3          # 剑影符：最多再叠 3 排弹道
-const ATK_STEP := 0.30        # 增攻符：每层 +30%
-const ATK_MAX := 4            # 增攻符：最多叠 4 层（+120%）
-const INVINC_TIME := 6.0      # 无量罩：无敌 6 秒
-## 增攻符的视觉强度：飞剑放大 / 符光加粗都用这个系数
+const HEAL_AMOUNT := 20       # 修复包：回复生命
+const MULTI_MAX := 3          # 刃影模块：最多再叠 3 排弹道
+const ATK_STEP := 0.30        # 增幅核心：每层 +30%
+const ATK_MAX := 4            # 增幅核心：最多叠 4 层（+120%）
+const INVINC_TIME := 6.0      # 力场罩：无敌 6 秒
+## 增幅核心的视觉强度：光刃放大 / 引力束加粗都用这个系数
 const ATK_VIS := 0.22
 
 var hp: int = MAX_HP
 var shield: int = SHIELD_MAX
-## 过热值：只在使用戊土符袍（黄）出光时累积
+## 过热值：只在使用引力束甲（黄）出束时累积
 var heat: float = 0.0
-## 剑影符层数 = 额外弹道排数（赤炎基准双排，其余基准单排，戊土基准一道符光）
+## 刃影模块层数 = 额外弹道排数（电浆基准双排，其余基准单排，引力基准一道束）
 var multi: int = 0
-## 增攻符层数 = 攻击力 +30% × 层数
+## 增幅核心层数 = 攻击力 +30% × 层数
 var atk_up: int = 0
-## 无量罩剩余秒数（> 0 即处于无敌）
+## 力场罩剩余秒数（> 0 即处于无敌）
 var invinc: float = 0.0
 var _locked := false       # 过热闭锁：一旦满值，须散到 HEAT_REARM 以下才解锁
-## 由 Level 显式注入：飞剑与特效的挂载容器（不靠 get_parent 猜）
+## 由 Level 显式注入：光刃与特效的挂载容器（不靠 get_parent 猜）
 var world: Node2D = null
-## 本局携带的两件道袍（进入关卡前选定，关卡内按空格轮换）
-var robes: Array[int] = [Game.RED, Game.WHITE]
-var robe_idx := 0
+## 本局携带的两件战甲（进入关卡前选定，关卡内按空格轮换）
+var armors: Array[int] = [Game.RED, Game.WHITE]
+var armor_idx := 0
 var alive := true
 
 var _fire := 0.0
@@ -66,31 +66,26 @@ var _time := 0.0
 var _trail: Array[Vector2] = []
 var _firing := false      # 本帧是否正在出光
 var _idle := 0.0          # 已停火多久
-## 符光（首次出光时创建，常驻；叠了剑影符会有多道）
+## 引力束（首次出束时创建，常驻；叠了刃影模块会有多道）
 var _beams: Array[Beam] = []
-## 像素道袍：44x36 侧身人形（朝右），由 tools/build_robes.py 手绘。
-## 故意**不做子节点** ——
-## 子节点默认画在父节点 _draw 之上，会把判定白点盖住；放在 _draw 里按原矢量的
-## 位置绘制，层序（飘带在后、判定点在前）与改图前完全一致。
-const ROBE_TEX_POS := Vector2(-22.0, -18.0)   # 44x36 居中
 
 var color: int:
 	get:
-		if robes.is_empty():
+		if armors.is_empty():
 			return Game.WHITE
-		return robes[robe_idx % robes.size()]
+		return armors[armor_idx % armors.size()]
 
 ## 过热闭锁中（满值 -> 未散到 HEAT_REARM 之前）无法出光
 var overheated: bool:
 	get:
 		return _locked
 
-## 攻击力倍率（增攻符层数 × 30%）
+## 攻击力倍率（增幅核心层数 × 30%）
 var atk_mul: float:
 	get:
 		return 1.0 + ATK_STEP * float(atk_up)
 
-## 无量罩生效中
+## 力场罩生效中
 var invincible: bool:
 	get:
 		return invinc > 0.0
@@ -100,29 +95,29 @@ func can_fire() -> bool:
 	return alive and not overheated
 
 
-## 当前实际弹道排数：赤炎剑袍基准双排，其余基准单排（戊土是一道符光），
-## 再加上剑影符的层数。
+## 当前实际弹道排数：电浆剑甲基准双排，其余基准单排（引力是一道束），
+## 再加上刃影模块的层数。
 func rows() -> int:
 	return (2 if color == Game.RED else 1) + multi
 
 
-## 单发伤害（受增攻符影响）
+## 单发伤害（受增幅核心影响）
 func sword_damage() -> int:
 	var base := 8 if color == Game.RED else 10
 	return maxi(1, int(roundf(float(base) * atk_mul)))
 
 
-## 飞剑尺寸系数：增攻符层数越多，剑身越大（碰撞体同步放大）
+## 光刃尺寸系数：增幅核心层数越多，剑身越大（碰撞体同步放大）
 func sword_size() -> float:
 	return 1.0 + ATK_VIS * float(atk_up)
 
 
-## 符光每秒伤害（受增攻符影响）
+## 引力束每秒伤害（受增幅核心影响）
 func beam_dps() -> float:
 	return BEAM_DPS * atk_mul
 
 
-## 符光粗细系数：增攻符层数越多，光柱越粗
+## 引力束粗细系数：增幅核心层数越多，光柱越粗
 func beam_width() -> float:
 	return 1.0 + ATK_VIS * float(atk_up)
 
@@ -136,8 +131,6 @@ func _ready() -> void:
 	sh.radius = HIT_R
 	cs.shape = sh
 	add_child(cs)
-	# 像素图必须最近邻，否则 48x28 会被插值糊掉
-	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	position = Vector2(230.0, Game.VIEW_H * 0.5)
 
 
@@ -150,7 +143,7 @@ func _process(delta: float) -> void:
 	_invuln = maxf(0.0, _invuln - delta)
 	_flash = maxf(0.0, _flash - delta)
 	_immune = maxf(0.0, _immune - delta)
-	# 无量罩：与受击后的无敌帧（_invuln）是两套，互不干涉
+	# 力场罩：与受击后的无敌帧（_invuln）是两套，互不干涉
 	if invinc > 0.0:
 		invinc = maxf(0.0, invinc - delta)
 
@@ -159,7 +152,7 @@ func _process(delta: float) -> void:
 		shield = SHIELD_MAX
 		stat_changed.emit()
 		Fx.ring(world, position, Game.COLOR_MAIN[Game.WHITE], 10.0, 38.0, 0.45, 4.0)
-		Fx.pop(world, position + Vector2(0.0, -34.0), "罡气回满",
+		Fx.pop(world, position + Vector2(0.0, -34.0), "护盾回满",
 			Game.COLOR_MAIN[Game.WHITE], 16)
 
 	_move(delta)
@@ -203,7 +196,7 @@ func _move(delta: float) -> void:
 
 
 # ---------------------------------------------------------------- 攻击
-## 戊土符袍走「按住持续出光」，其余道袍走「按冷却递飞剑」
+## 引力束甲走「按住持续出束」，其余战甲走「按冷却递光刃」
 func _shoot() -> void:
 	var firing := Input.is_action_pressed("shoot") \
 		or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
@@ -236,9 +229,9 @@ func _fire_swords() -> void:
 		_spawn_sword(Vector2(26.0, oy), dmg, size)
 
 
-# ---------------------------------------------------------------- 符光
-## 戊土符袍叠了剑影符 -> 多道符光并排。
-## 注意过热值**不随道数增加**：_update_heat() 只认「是否在出光」这一件事，
+# ---------------------------------------------------------------- 引力束
+## 引力束甲叠了刃影模块 -> 多道引力束并排。
+## 注意过热值**不随道数增加**：_update_heat() 只认「是否在出束」这一件事，
 ## 加排只加伤害，不加发热（这是需求里明确要求的）。
 func _beam_on() -> void:
 	if world == null:
@@ -268,7 +261,7 @@ func _beam_off() -> void:
 			bm.turn_off()
 
 
-## 多道符光在竖直方向均匀铺开：1 道居中，2 道上下，3 道加中线……
+## 多道引力束在竖直方向均匀铺开：1 道居中，2 道上下，3 道加中线……
 func _beam_y(i: int, n: int) -> float:
 	if n <= 1:
 		return 0.0
@@ -277,7 +270,7 @@ func _beam_y(i: int, n: int) -> float:
 
 
 # ---------------------------------------------------------------- 过热
-## 出光 -> 每秒 +20；停火满 0.5 秒 -> 每秒 -30；触及戊土弹 -> 立刻 -30
+## 出束 -> 每秒 +20；停火满 0.5 秒 -> 每秒 -30；触及引力弹 -> 立刻 -30
 func _update_heat(delta: float) -> void:
 	if _firing:
 		_idle = 0.0
@@ -302,36 +295,36 @@ func _spawn_sword(off: Vector2, dmg: int, size: float = 1.0) -> void:
 	Sword.spawn(world, color, position + off, dmg, Vector2(980.0, 0.0), size)
 
 
-# ---------------------------------------------------------------- 换袍
+# ---------------------------------------------------------------- 换甲
 func do_swap() -> void:
-	if robes.size() < 2:
+	if armors.size() < 2:
 		return
-	robe_idx = (robe_idx + 1) % robes.size()
+	armor_idx = (armor_idx + 1) % armors.size()
 	_swap = SWAP_CD
 	_invuln = maxf(_invuln, 0.18)
-	robe_changed.emit(color)
+	armor_changed.emit(color)
 	stat_changed.emit()
 	Fx.ring(world, position, Game.COLOR_MAIN[color], 6.0, 52.0, 0.32, 7.0)
 
 
 # ---------------------------------------------------------------- 受伤
-## 返回 true 表示弹幕应被消耗（被吸收 / 打中）；false 表示穿过（无敌帧 / 无量罩）
+## 返回 true 表示弹幕应被消耗（被吸收 / 打中）；false 表示穿过（无敌帧 / 力场罩）
 func take_hit(c: int, dmg: int) -> bool:
 	if not alive or _invuln > 0.0:
 		return false
-	# 戊土（黄）弹：不论身上是否戊土袍，触及即引走热气
+	# 引力（黄）弹：不论身上是否引力束甲，触及即引走热气
 	if c == Game.YELLOW and heat > 0.0:
 		heat = maxf(0.0, heat - HEAT_VENT)
 		Fx.pop(world, position + Vector2(0.0, -46.0), "散热 -%d" % int(HEAT_VENT),
 			Game.COLOR_MAIN[Game.YELLOW], 16, 0.7)
 		stat_changed.emit()
-	# 无量罩：六秒内诸法不侵（放在扣血之前，所以也不会打断十息回气）
+	# 力场罩：六秒内诸法不侵（放在扣血之前，所以也不会打断十息回盾）
 	if invinc > 0.0:
 		_immune = 0.22
 		Fx.ring(world, position, Game.COLOR_MAIN[randi() % 4], 17.0, 48.0, 0.26, 4.0)
 		return false
 	if c == color:
-		# 同色吸收：道袍把这一枚吞下去（Danmaku 收到 true 会 _kill 消失），玩家不掉血。
+		# 同色吸收：战甲把这一枚吞下去（Danmaku 收到 true 会 _kill 消失），玩家不掉血。
 		# 光环由「内 -> 外」翻成「外 -> 内」收拢：读起来是吸入，而不是弹开。
 		_immune = 0.22
 		Fx.ring(world, position, Game.COLOR_GLOW[c], 34.0, 8.0, 0.24, 3.0)
@@ -343,7 +336,7 @@ func take_hit(c: int, dmg: int) -> bool:
 		shield -= ab
 		dmg -= ab
 		Fx.ring(world, position, Color(1.0, 1.0, 1.0, 0.9), 18.0, 44.0, 0.32, 5.0)
-		Fx.pop(world, position + Vector2(0.0, -32.0), "罡气 -%d" % ab,
+		Fx.pop(world, position + Vector2(0.0, -32.0), "护盾 -%d" % ab,
 			Color(0.90, 0.95, 1.0), 16)
 	if dmg > 0:
 		hp -= dmg
@@ -371,10 +364,10 @@ func apply_pickup(k: int) -> String:
 	match k:
 		Pickup.T.HEAL:
 			if hp >= MAX_HP:
-				return "元神已满"
+				return "生命已满"
 			hp = mini(MAX_HP, hp + HEAL_AMOUNT)
 			stat_changed.emit()
-			return "元神 +%d" % HEAL_AMOUNT
+			return "生命 +%d" % HEAL_AMOUNT
 		Pickup.T.MULTI:
 			if multi >= MULTI_MAX:
 				return "弹道已满"
@@ -390,7 +383,7 @@ func apply_pickup(k: int) -> String:
 		Pickup.T.INVINC:
 			invinc = maxf(invinc, INVINC_TIME)
 			stat_changed.emit()
-			return "无量罩 · %.0f 秒" % INVINC_TIME
+			return "力场罩 · %.0f 秒" % INVINC_TIME
 	return ""
 
 
@@ -423,7 +416,7 @@ func _draw() -> void:
 	var dk: Color = Game.COLOR_DARK[c]
 	var pulse := 0.5 + 0.5 * sin(_time * 4.0)
 
-	# 玄冰遁袍：残影
+	# 寒霜疾甲：残影
 	for i in _trail.size():
 		var p := to_local(_trail[i])
 		var a := 0.22 * (1.0 - float(i) / float(_trail.size()))
@@ -434,7 +427,7 @@ func _draw() -> void:
 	draw_arc(Vector2.ZERO, 23.0 + 2.5 * pulse, 0.0, TAU, 32,
 		Color(m.r, m.g, m.b, 0.45), 2.0, true)
 
-	# 无量罩：六秒无敌 —— 四色流转的护体法罩 + 逆向游走的灵点
+	# 力场罩：六秒无敌 —— 四色流转的护体罩 + 逆向游走的能量点
 	if invinc > 0.0:
 		var ia := 0.70 + 0.30 * sin(_time * 8.0)
 		if invinc < 1.2:                     # 将散时急促闪烁，给玩家收尾提示
@@ -452,14 +445,14 @@ func _draw() -> void:
 			draw_circle(Vector2.RIGHT.rotated(a2) * rr, 3.4,
 				Color(gl.r, gl.g, gl.b, 0.8 * ia))
 
-	# 太清罡袍：护盾环
+	# 光子盾甲：护盾环
 	if c == Game.WHITE and shield > 0:
 		var sr := float(shield) / float(SHIELD_MAX)
 		draw_arc(Vector2.ZERO, 30.0, -PI * 0.5, -PI * 0.5 + TAU * sr, 40,
 			Color(1.0, 1.0, 1.0, 0.85), 4.0, true)
 		draw_circle(Vector2.ZERO, 30.0, Color(0.95, 0.98, 1.0, 0.06))
 
-	# 本命飞剑（绕身）
+	# 绕身光刃
 	for i in 3:
 		var a := _time * 2.2 + TAU * float(i) / 3.0
 		var p := Vector2.RIGHT.rotated(a) * 34.0
@@ -471,8 +464,8 @@ func _draw() -> void:
 		draw_colored_polygon(sq, Color(m.r, m.g, m.b, 0.75))
 		draw_set_transform_matrix(Transform2D.IDENTITY)
 
-	# 前置飞剑：赤炎剑袍基准双排；叠了剑影符之后按实际排数显示
-	# （戊土符袍出的是符光不是飞剑，不画）
+	# 前置光刃：电浆剑甲基准双排；叠了刃影模块之后按实际排数显示
+	# （引力束甲出的是引力束不是光刃，不画）
 	if c != Game.YELLOW and (c == Game.RED or multi > 0):
 		var n := rows()
 		var fgap := minf(34.0, 100.0 / maxf(1.0, float(n - 1)))
@@ -484,7 +477,7 @@ func _draw() -> void:
 			])
 			draw_colored_polygon(sq, Color(m.r, m.g, m.b, 0.9))
 
-	# 戊土符袍：绕身符箓
+	# 引力束甲：绕身引力符
 	if c == Game.YELLOW:
 		for i in 3:
 			var a := _time * 1.6 + TAU * float(i) / 3.0
@@ -497,37 +490,33 @@ func _draw() -> void:
 			draw_colored_polygon(q, Color(k.r, k.g, k.b, 0.55))
 			draw_set_transform_matrix(Transform2D.IDENTITY)
 
-	# 戊土符袍：过热环（满环即滞）
+	# 引力束甲：过热环（满环即滞）
 	if c == Game.YELLOW and heat > 0.0:
 		var hr := clampf(heat / HEAT_MAX, 0.0, 1.0)
 		var hc := Color(1.0, 0.35, 0.20) if overheated else Color(1.0, 0.78, 0.20)
 		draw_arc(Vector2.ZERO, 38.0, -PI * 0.5, -PI * 0.5 + TAU * hr, 40,
 			Color(hc.r, hc.g, hc.b, 0.9), 4.0, true)
 
-	# 飘带
+	# 能量尾带
 	var rb := PackedVector2Array()
 	for i in 9:
 		var t := float(i) / 8.0
 		rb.append(Vector2(-18.0 - t * 34.0, sin(_time * 6.0 - t * 4.0) * 7.0 * t))
 	draw_polyline(rb, Color(m.r, m.g, m.b, 0.55), 3.0, true)
 
-	# 道袍：优先像素 sprite；纹理缺失时退回矢量画法（玩家不能变隐形）
-	var robe_tex := ArtAssets.by_color("robe", color)
-	if robe_tex != null:
-		draw_texture(robe_tex, ROBE_TEX_POS)
-	else:
-		var body := PackedVector2Array([
-			Vector2(20.0, 0.0), Vector2(6.0, -11.0), Vector2(-14.0, -9.0),
-			Vector2(-20.0, 0.0), Vector2(-14.0, 9.0), Vector2(6.0, 11.0)
-		])
-		draw_colored_polygon(body, dk)
-		var ring := PackedVector2Array(body)
-		ring.append(body[0])
-		draw_polyline(ring, m, 2.0, true)
-		# 头 / 发髻
-		draw_circle(Vector2(11.0, -1.0), 6.0, k)
-		draw_arc(Vector2(11.0, -1.0), 6.0, 0.0, TAU, 16, m, 1.6, true)
-		draw_circle(Vector2(6.0, -8.0), 3.6, dk)
+	# 战甲本体（矢量画法）
+	var body := PackedVector2Array([
+		Vector2(20.0, 0.0), Vector2(6.0, -11.0), Vector2(-14.0, -9.0),
+		Vector2(-20.0, 0.0), Vector2(-14.0, 9.0), Vector2(6.0, 11.0)
+	])
+	draw_colored_polygon(body, dk)
+	var ring := PackedVector2Array(body)
+	ring.append(body[0])
+	draw_polyline(ring, m, 2.0, true)
+	# 头 / 头盔
+	draw_circle(Vector2(11.0, -1.0), 6.0, k)
+	draw_arc(Vector2(11.0, -1.0), 6.0, 0.0, TAU, 16, m, 1.6, true)
+	draw_circle(Vector2(6.0, -8.0), 3.6, dk)
 
 	# 判定点
 	draw_circle(Vector2.ZERO, HIT_R, Color(m.r, m.g, m.b, 0.13))

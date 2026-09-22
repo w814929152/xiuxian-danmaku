@@ -21,32 +21,17 @@ const DIR := "res://assets/sprites/"
 const _CN := ["red", "blue", "white", "yellow"]
 
 const FILES: Dictionary[String, String] = {
-	# 玩家 in-game 像素道袍：44x36 侧身人形（朝右），由 tools/build_robes.py 手绘
-	# （不是立绘缩小 —— 立绘缩到这个尺寸会糊）。四件共用同一基础剪影；颜色仍是
-	# 属性识别的第一载体，但每件另有 1~2 个**形状层身份部件**（红双剑 / 蓝飘带
-	# 霜晶 / 白罡罩护肩 / 黄符箓）供切换后一眼分辨 —— 改部件见 build_robes.py
-	# 的 EXTRAS 一节。靠 by_color 取。
-	"robe_red": "robe_red.png",
-	"robe_blue": "robe_blue.png",
-	"robe_white": "robe_white.png",
-	"robe_yellow": "robe_yellow.png",
-	# 小妖：42x42 朝左人形妖（弓身矮壮、V 形双角、獠牙、三指爪、赤足），
-	# 由 tools/build_enemies.py 手绘（不是异形怪物图 —— 旧的 AI 生成图识别度差）。
-	# 四色完全同形、只换四档映射，靠 by_color 取。
-	"enemy_red": "enemy_red.png",
-	"enemy_blue": "enemy_blue.png",
-	"enemy_yellow": "enemy_yellow.png",
-	"enemy_white": "enemy_white.png",
-	# 护法妖将：84x84 朝左直立人形妖（双巨角带分叉、肩吞、披风、腰带兽面扣、
-	# 兵器按属性切换）。**独立重绘，不是小妖图的放大** —— 整数放大把 2px 元素
-	# 糊成 4px 块，且会被读成「小妖群」。同靠 by_color 取。
-	"elite_red": "elite_red.png",
-	"elite_blue": "elite_blue.png",
-	"elite_yellow": "elite_yellow.png",
-	"elite_white": "elite_white.png",
+	# 小妖 / 妖将已回滚为矢量异形妖怪（scripts/art/YokaiArt.gd），不再引用
+	# enemy_* / elite_* 像素 PNG；文件仍保留在 assets/sprites/ 供追溯。
 	"boss": "boss.png",
-	# 弹幕：四色同形的白模弹丸，使用处以 modulate 染属性色
-	"danmaku": "danmaku.png",
+	# 弹幕：四色四形异形弹（火球 / 冰锥 / 灵环 / 符牌），使用处按属性色取图，
+	# 异形图自带颜色、不再 modulate 染色。源图已丢失（AI 源图目录被删），
+	# 这四张由 9/16 的导入缓存孤儿 .ctex（无损 WebP 存储）反解恢复，
+	# 尺寸分别为 34x34 / 34x23 / 34x34 / 33x34（异形弹画布本就不同）。
+	"danmaku_red": "danmaku_red.png",
+	"danmaku_blue": "danmaku_blue.png",
+	"danmaku_white": "danmaku_white.png",
+	"danmaku_yellow": "danmaku_yellow.png",
 	# 白模：使用处以 modulate 染成属性色
 	"sword_player": "sword_player.png",
 	"fx_burst": "fx_burst.png",

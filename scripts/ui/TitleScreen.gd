@@ -1,17 +1,17 @@
 class_name TitleScreen
 extends Node2D
 ## 开始界面（主菜单）
-## 三项：开始游戏 / 道袍库 / 游戏说明
+## 三项：开始出征 / 战甲库 / 作战手册
 ## 键盘 ↑↓ + Enter，或数字键 1/2/3 直达，鼠标悬停高亮 + 左键点击
 
 signal start_pressed()
 signal gallery_pressed()
 signal help_pressed()
 
-const ITEMS := ["开 始 问 道", "道 袍 库", "游 戏 说 明"]
+const ITEMS := ["开 始 出 征", "战 甲 库", "作 战 手 册"]
 const SUBS := [
-	"择两件道袍 · 历三重妖潮 · 战血魔老祖",
-	"翻阅四件道袍的形制、免疫与神通",
+	"择两件战甲 · 历三重星袭 · 战星盗始祖",
+	"翻阅四件战甲的形制、免疫与战技",
 	"操作、规则、计分与破罩之法",
 ]
 
@@ -106,9 +106,9 @@ func _draw() -> void:
 
 	# 标题
 	var ty := H * 0.255
-	DrawUtil.txt(self, "弹 幕 修 仙", Vector2(cx + 3.0, ty + 3.0), 80,
+	DrawUtil.txt(self, "星 际 弹 幕", Vector2(cx + 3.0, ty + 3.0), 80,
 		Color(0.05, 0.02, 0.08, 0.85), HORIZONTAL_ALIGNMENT_CENTER)
-	DrawUtil.txt(self, "弹 幕 修 仙", Vector2(cx, ty), 80,
+	DrawUtil.txt(self, "星 际 弹 幕", Vector2(cx, ty), 80,
 		Color(1.0, 0.94, 0.76), HORIZONTAL_ALIGNMENT_CENTER)
 
 	# 菜单
@@ -151,6 +151,6 @@ func _draw() -> void:
 		Vector2(cx, H - 58.0), 16, Color(0.66, 0.72, 0.90),
 		HORIZONTAL_ALIGNMENT_CENTER)
 	var a := 0.5 + 0.5 * (0.5 + 0.5 * sin(_t * 2.2))
-	DrawUtil.txt(self, "入关卡前需择【两件】道袍，关卡内以【空格】互换",
+	DrawUtil.txt(self, "入关卡前需择【两件】战甲，关卡内以【空格】互换",
 		Vector2(cx, H - 30.0), 15, Color(0.60, 0.66, 0.86, a),
 		HORIZONTAL_ALIGNMENT_CENTER)

@@ -1,11 +1,11 @@
 class_name Sword
 extends Area2D
-## 玩家飞剑（颜色 = 当前道袍色）
+## 玩家光刃（颜色 = 当前战甲色）
 ##
 ## Phase 4：
-##   · 走 Pool 对象池（赤炎剑袍每秒约 20 把）
+##   · 走 Pool 对象池（电浆剑甲每秒约 20 把）
 ##   · 位移迁到 _physics_process：980 px/s 的速度在 30fps 下单帧跨 32px，
-##     原来放在 _process 里会直接跨过小妖（半径 19）造成穿模
+##     原来放在 _process 里会直接跨过星盗（半径 19）造成穿模
 
 const POOL_KEY := "sword"
 
@@ -17,7 +17,7 @@ var vel := Vector2(980.0, 0.0)
 var life := 2.2
 var _t := 0.0
 var _alive := false
-## 像素 sprite（白模共享纹理，modulate 染成道袍色）
+## 像素 sprite（白模共享纹理，modulate 染成战甲色）
 var _art: Sprite2D = null
 
 
@@ -26,7 +26,7 @@ static func _make() -> Node:
 
 
 ## 唯一生成入口：优先从池中取，池空才新建
-## size > 1 表示拾了增攻符 —— 整节点放大，剑身与碰撞体一起变粗
+## size > 1 表示拾了增幅核心 —— 整节点放大，剑身与碰撞体一起变粗
 static func spawn(parent: Node2D, c: int, p: Vector2, d: int, v: Vector2,
 		size: float = 1.0) -> Sword:
 	var s := Pool.acquire(POOL_KEY, parent, Sword._make) as Sword
@@ -52,8 +52,8 @@ func _ready() -> void:
 	area_entered.connect(_on_area_entered)
 
 
-## 池化复用：必须覆盖上一把剑留下的全部状态（含 scale —— 增攻符会放大剑身；
-## 含 _art.modulate —— 白模按道袍色染色）
+## 池化复用：必须覆盖上一把剑留下的全部状态（含 scale —— 增幅核心会放大剑身；
+## 含 _art.modulate —— 白模按战甲色染色）
 func setup(c: int, p: Vector2, d: int, v: Vector2, size: float = 1.0) -> void:
 	color = c
 	position = p

@@ -1,33 +1,33 @@
 class_name Elite
 extends Damageable
-## 护法妖将 —— 第 2 / 第 3 重妖潮的压轴精英怪
+## 星盗战将 —— 第 2 / 第 3 波星袭的压轴精英怪
 ##
-## 核心是【属性法罡】，可以理解为「会走位的老祖法罩」：
-##   · 法罡存续时：同色飞剑全额（并享同源共振 +50%），异色只剩 WARD_RESIST；
-##     **法罡不破，本体一点血都不掉** —— 不换袍就只能在罡上刮痧。
-##   · 法罡色只从玩家已选的两件道袍中抽取（同老祖的法罩）。
+## 核心是【属性力场】，可以理解为「会走位的始祖护罩」：
+##   · 力场存续时：同色光刃全额（并享同源共振 +50%），异色只剩 WARD_RESIST；
+##     **力场不破，本体一点血都不掉** —— 不换甲就只能在力场上刮痧。
+##   · 力场色只从玩家已选的两件战甲中抽取（同始祖的护罩）。
 ##     这不是为了复刻机制，而是**可行性要求**：凭空给个玩家没带的颜色，
-##     破罡就成了死局 —— 那不是难度，是设计事故。
+##     破力场就成了死局 —— 那不是难度，是设计事故。
 ##   · 打破一层 -> 虚弱期（BROKEN_TIME）：移速减半、出手放慢、本体任意颜色全额。
-##   · 虚弱结束会重铸法罡，但 WARD_LAYERS 有限（用完即永久破防）。
-##     无限重铸的话，「打不死」的挫败感会盖过「换袍破罡」的爽点。
+##   · 虚弱结束会重铸力场，但 WARD_LAYERS 有限（用完即永久破防）。
+##     无限重铸的话，「打不死」的挫败感会盖过「换甲破力场」的爽点。
 ## 击杀必掉一件道具（见 Level._on_elite_killed）。
 ##
-## 外观：四色妖将 sprite（朝左直立人形，tools/build_enemies.py 烘焙）
-## + 矢量法罡环 + 头顶双条（法罡 / 本体）。
+## 外观：四色异形星盗（YokaiArt 矢量绘制，主体 = 星盗 ×1.7 同剪影）
+## + 矢量力场环 + 头顶双条（力场 / 本体）。
 ## 不走对象池 —— 一局只有两只，多一层 reset 不值。
 
 signal killed(pos: Vector2, c: int, sc: int)
 
-## 本体元神（× hp_scale）
+## 本体生命（× hp_scale）
 const BASE_HP := 480
-## 单层法罡值（× hp_scale）
+## 单层力场值（× hp_scale）
 const WARD_HP := 150
-## 法罡总层数：破一层虚弱一次，可重铸次数 = 层数 - 1
+## 力场总层数：破一层虚弱一次，可重铸次数 = 层数 - 1
 const WARD_LAYERS := 2
-## 法罡存续时，异色飞剑只剩这个比例（老祖法罩是 0.60，这里更狠 —— 逼你换袍）
+## 力场存续时，异色光刃只剩这个比例（始祖护罩是 0.60，这里更狠 —— 逼你换甲）
 const WARD_RESIST := 0.35
-## 破罡后的虚弱期（秒）
+## 破力场后的虚弱期（秒）
 const BROKEN_TIME := 4.5
 ## 巡游速度
 const SPEED := 150.0
@@ -35,26 +35,26 @@ const SPEED := 150.0
 const FIRE_CD := 1.05
 ## 斩杀奖励
 const SCORE := 800
-## 碰撞半径（妖将 sprite 原生 84x84，圆只罩躯干核心，角与兵器在圆外属造型）
+## 碰撞半径（主体剪影壳 ≤ r32，角 / 尾 / 顶冠在圆外属造型）
 const R := 34.0
 
 var color: int = Game.RED
 var hp := 0
 var max_hp := 0
-## 当前法罡值 / 单层法罡上限
+## 当前力场值 / 单层力场上限
 var ward := 0
 var ward_max := 0
 ## 剩余可重铸层数
 var layers := WARD_LAYERS
-## 虚弱期剩余秒数（> 0 即处于法罡已破的虚弱状态）
+## 虚弱期剩余秒数（> 0 即处于力场已破的虚弱状态）
 var broken := 0.0
 var score := SCORE
 var dead := false
 ## 由 Level 显式注入：弹幕与特效的挂载容器
 var world: Node2D = null
 var player_ref: Player = null
-## 法罡色只从这里抽（玩家的已选道袍）
-var player_robes: Array[int] = []
+## 力场色只从这里抽（玩家的已选战甲）
+var player_armors: Array[int] = []
 
 var _t := 0.0
 var _fire := 0.0
@@ -62,8 +62,8 @@ var _flash := 0.0
 var _base_y := 360.0
 var _home_x := 940.0
 var _entered := false
-## 像素 sprite（四色妖将由 ArtAssets 按法罡色切换，原生 84x84 不放大）
-var _art: Sprite2D = null
+## 呼吸 / 尾抖的实例随机相位（YokaiArt 动画用）
+var _phase := randf() * TAU
 
 
 ## [param hp_scale] 波次强度系数；[param y] 巡游基准高度
@@ -76,14 +76,12 @@ func setup(hp_scale: float = 1.0, y: float = 360.0) -> void:
 	broken = 0.0
 	_base_y = y
 	position = Vector2(Game.VIEW_W + 90.0, y)
-	# 法罡色：只从玩家携带的道袍中抽 —— 保证一定破得了
-	if player_robes.is_empty():
+	# 力场色：只从玩家携带的战甲中抽 —— 保证一定破得了
+	if player_armors.is_empty():
 		color = randi() % 4
 	else:
-		color = player_robes[randi() % player_robes.size()]
+		color = player_armors[randi() % player_armors.size()]
 	_fire = 1.2
-	if _art != null:
-		_art.texture = ArtAssets.by_color("elite", color)
 
 
 func _ready() -> void:
@@ -95,10 +93,6 @@ func _ready() -> void:
 	sh.radius = R
 	cs.shape = sh
 	add_child(cs)
-	_art = ArtAssets.make_sprite("")
-	add_child(_art)
-	# 84x84 sprite 已按妖将原生尺寸烘焙（R=34 < 84/2，角与兵器在碰撞圆外属造型），
-	# 不再做节点级放大 —— 旧的小妖图 x1.79 会把 2px 元素糊成 4px 块。
 
 
 func _process(delta: float) -> void:
@@ -139,7 +133,7 @@ func _firing(delta: float) -> void:
 	_fire -= delta
 	if _fire > 0.0:
 		return
-	# 与小妖同一条规则：难度越低，出手越慢
+	# 与星盗同一条规则：难度越低，出手越慢
 	var cd := FIRE_CD * (2.0 - Game.bullet_scale())
 	if broken > 0.0:
 		cd *= 1.8
@@ -162,19 +156,19 @@ func _shoot() -> void:
 		return
 	match color:
 		Game.RED:
-			# 炎将：七向扇射
+			# 电浆战将：七向扇射
 			for i in 7:
 				_shot(color, Vector2.RIGHT.rotated(a + (i - 3) * 0.19), 270.0, 9.0, 10)
 		Game.BLUE:
-			# 冰将：五连速射
+			# 寒霜战将：五连速射
 			for i in 5:
 				_shot(color, Vector2.RIGHT.rotated(a + (i - 2) * 0.06), 365.0, 8.0, 10)
 		Game.YELLOW:
-			# 土将：慢速宽散射符牌
+			# 引力战将：慢速宽散射能量弹
 			for i in 3:
 				_shot(color, Vector2.RIGHT.rotated(a + (i - 1) * 0.44), 230.0, 10.0, 10)
 		_:
-			# 清灵将：十四向灵环（缓慢自转）
+			# 光子战将：十四向能量环（缓慢自转）
 			for i in 14:
 				_shot(color, Vector2.RIGHT.rotated(_t * 0.6 + TAU * float(i) / 14.0),
 					205.0, 10.0, 10)
@@ -192,7 +186,7 @@ func hit(dmg: int, c: int) -> void:
 	if dead:
 		return
 	var same := (c == color)
-	# 法罡未破 -> 异色刮痧；法罡已破 -> 任意颜色全额（同色另有共振 +50%）
+	# 力场未破 -> 异色刮痧；力场已破 -> 任意颜色全额（同色另有共振 +50%）
 	var mul := 1.5 if same else (WARD_RESIST if ward > 0 else 1.0)
 	var real := maxi(1, int(roundf(float(dmg) * mul)))
 	_flash = 0.09
@@ -223,7 +217,7 @@ func _break_ward() -> void:
 	layers -= 1
 	Fx.ring(world, position, Game.COLOR_MAIN[color], R, 130.0, 0.5, 6.0)
 	Fx.burst(world, position, Game.COLOR_GLOW[color], 22, 320.0, 0.7)
-	Fx.pop(world, position + Vector2(0.0, -70.0), "法 罡 破",
+	Fx.pop(world, position + Vector2(0.0, -70.0), "力 场 破",
 		Color(1.0, 0.92, 0.55), 21, 1.1)
 
 
@@ -233,7 +227,7 @@ func _recast() -> void:
 		return
 	ward = ward_max
 	Fx.ring(world, position, Game.COLOR_MAIN[color], 140.0, R + 10.0, 0.45, 5.0)
-	Fx.pop(world, position + Vector2(0.0, -70.0), "法罡重铸",
+	Fx.pop(world, position + Vector2(0.0, -70.0), "力场重铸",
 		Game.COLOR_MAIN[color], 18, 0.9)
 
 
@@ -253,11 +247,19 @@ func _draw() -> void:
 	var k: Color = Game.COLOR_CORE[color]
 	var pulse := 0.5 + 0.5 * sin(_t * 3.4)
 
-	# 本命气息
-	draw_circle(Vector2.ZERO, R + 16.0 + 6.0 * pulse, Color(g.r, g.g, g.b, 0.10))
+	# ① 本命气息（r38~40，力场弧内缘 43 内留呼吸）
+	draw_circle(Vector2.ZERO, 38.0 + 2.0 * pulse, Color(g.r, g.g, g.b, 0.10))
 
+	# ②~⑧ 异形本体（YokaiArt：层序铁律在内部完成，CORE 主核最后画）
+	YokaiArt.draw_elite(self, color, _t, _phase)
+
+	# ⑨ 受击白闪（覆盖本体，读反馈）
+	if _flash > 0.0:
+		draw_circle(Vector2.ZERO, R + 4.0, Color(1.0, 1.0, 1.0, _flash * 2.4))
+
+	# ⑩ 力场 / 裂环 + 双血条 + 身份文字 —— 永远保持在主体之上
 	if ward > 0:
-		# 法罡：双层弧 + 八枚游走符点，透明度随剩余值衰减
+		# 力场：双层弧 + 八枚游走能量点，透明度随剩余值衰减
 		var wr := clampf(float(ward) / float(maxi(1, ward_max)), 0.0, 1.0)
 		var a := (0.45 + 0.35 * pulse) * (0.45 + 0.55 * wr)
 		draw_circle(Vector2.ZERO, R + 12.0, Color(m.r, m.g, m.b, 0.10 * wr + 0.03))
@@ -269,18 +271,16 @@ func _draw() -> void:
 			var p := Vector2.RIGHT.rotated(ang) * (R + 12.0)
 			draw_circle(p, 3.6, Color(k.r, k.g, k.b, a))
 	else:
-		# 法罡已破：一圈黯淡的裂环 —— 一眼看出「现在能打疼它」
+		# 力场已破：一圈黯淡的裂环 —— 一眼看出「现在能打疼它」
 		for i in 6:
 			var a0 := _t * 0.4 + TAU * float(i) / 6.0
 			draw_arc(Vector2.ZERO, R + 8.0, a0, a0 + 0.34, 12,
 				Color(0.78, 0.82, 0.95, 0.5), 3.5, true)
 
-	if _flash > 0.0:
-		draw_circle(Vector2.ZERO, R + 4.0, Color(1.0, 1.0, 1.0, _flash * 2.4))
 	_bars()
 
 
-## 头顶双条：上条法罡、下条本体，外加一行身份
+## 头顶双条：上条力场、下条本体，外加一行身份
 func _bars() -> void:
 	var m: Color = Game.COLOR_MAIN[color]
 	if ward_max > 0:
@@ -288,7 +288,7 @@ func _bars() -> void:
 		_bar(-48.0, -84.0, 96.0, 6.0, wr, Color(m.r, m.g, m.b, 0.95))
 	var hr := clampf(float(hp) / float(maxi(1, max_hp)), 0.0, 1.0)
 	_bar(-48.0, -75.0, 96.0, 7.0, hr, Color(1.0, 0.34, 0.36))
-	DrawUtil.txt(self, "护法妖将 · %s" % Game.COLOR_CN[color], Vector2(0.0, -92.0),
+	DrawUtil.txt(self, "星盗战将 · %s" % Game.COLOR_CN[color], Vector2(0.0, -92.0),
 		15, m, HORIZONTAL_ALIGNMENT_CENTER)
 
 

@@ -4,14 +4,14 @@ extends Area2D
 ## 漂浮道具 · 掉落物
 ##
 ## 两个来源（都由 Level 发起）：
-##   1. 击杀小妖按概率掉落（DROP_CHANCE = 18%，实测 18.65%）
-##   2. 每波妖潮结束刷新 WAVE_DROP = 1 个
-## 每局合计约 3.6（斩妖）+ 3（三波）≈ 6~7 个。
-## 波次刷新原来是 2 个 —— 固定送的占总量的大半，反而把「斩妖出不出货」稀释掉了，收到 1 个。
+##   1. 击杀星盗按概率掉落（DROP_CHANCE = 18%，实测 18.65%）
+##   2. 每波星袭结束刷新 WAVE_DROP = 1 个
+## 每局合计约 3.6（斩敌）+ 3（三波）≈ 6~7 个。
+## 波次刷新原来是 2 个 —— 固定送的占总量的大半，反而把「斩敌出不出货」稀释掉了，收到 1 个。
 ##
 ## 不走对象池：一局只掉十来个，池化收益为零，反而多一层 reset 要维护。
 ## 碰撞层 bit4「道具」—— 玩家 mask 加了 bit4 才吃得到，
-## 飞剑（mask=bit2 敌人）与敌弹（mask=bit0 玩家）都不会误触它。
+## 光刃（mask=bit2 敌人）与敌弹（mask=bit0 玩家）都不会误触它。
 ## ---------------------------------------------------------------
 
 enum T { HEAL, MULTI, ATK, INVINC }
@@ -19,17 +19,17 @@ enum T { HEAL, MULTI, ATK, INVINC }
 const N := 4
 
 ## 名称 / 拾取飘字 / 主色 / 器形上的一字
-const CN := ["回春丹", "剑影符", "增攻符", "无量罩"]
-const TIP := ["元神 +20", "弹道 +1", "攻击 +30%", "无敌 6 秒"]
-const GLYPH := ["回", "影", "攻", "无"]
+const CN := ["修复包", "刃影模块", "增幅核心", "力场罩"]
+const TIP := ["生命 +20", "弹道 +1", "攻击 +30%", "无敌 6 秒"]
+const GLYPH := ["修", "影", "增", "力"]
 const COL := [
-	Color(0.42, 0.95, 0.55),   # 回春 · 青绿
-	Color(0.45, 0.80, 1.00),   # 剑影 · 天蓝
-	Color(1.00, 0.62, 0.22),   # 增攻 · 橙
-	Color(1.00, 0.92, 0.45),   # 无量 · 明黄
+	Color(0.42, 0.95, 0.55),   # 修复 · 青绿
+	Color(0.45, 0.80, 1.00),   # 刃影 · 天蓝
+	Color(1.00, 0.62, 0.22),   # 增幅 · 橙
+	Color(1.00, 0.92, 0.45),   # 力场 · 明黄
 ]
 
-## 掉落权重（相对值，不必归一）—— 回春略高，无敌略低
+## 掉落权重（相对值，不必归一）—— 修复包略高，力场罩略低
 const WEIGHT: Array[int] = [30, 24, 26, 20]
 
 const R := 21.0            # 拾取半径
@@ -48,13 +48,13 @@ var _alive := false
 var _spin := 0.0
 
 
-## 唯一生成入口。pos 为掉落点（通常是小妖的死亡位置）。
+## 唯一生成入口。pos 为掉落点（通常是星盗的死亡位置）。
 ##
 ## 入树要延后一帧：掉落常常发生在**物理回调里**
-## （飞剑命中 -> Sword._on_area_entered -> Enemy._die -> Level 掉落），
+## （光刃命中 -> Sword._on_area_entered -> Enemy._die -> Level 掉落），
 ## 那时新建 Area2D 并改碰撞层会报
 ## "Can't change this state while flushing queries. Use call_deferred() ..."。
-## 与弹幕 / 飞剑归还时用 call_deferred 摘除是同一条规矩：
+## 与弹幕 / 光刃归还时用 call_deferred 摘除是同一条规矩：
 ## **别在物理回调里动碰撞体**。这个坑只在真的打死怪时才走得到，很容易漏。
 static func spawn(parent: Node2D, k: int, pos: Vector2) -> Pickup:
 	if parent == null or not is_instance_valid(parent):
@@ -133,7 +133,7 @@ func _taken(p: Player) -> void:
 	var gain := p.apply_pickup(kind)
 	Fx.ring(world, position, COL[kind], 8.0, 56.0, 0.36, 6.0)
 	Fx.burst(world, position, COL[kind], 12, 220.0, 0.45)
-	# gain 为空串表示已满 / 无需提示（例如满血吃回春）
+	# gain 为空串表示已满 / 无需提示（例如满血吃修复包）
 	if gain != "":
 		Fx.pop(world, position + Vector2(0.0, -26.0), gain, COL[kind], 19, 0.9)
 	queue_free()

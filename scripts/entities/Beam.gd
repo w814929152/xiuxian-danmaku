@@ -1,6 +1,6 @@
 class_name Beam
 extends Area2D
-## 戊土符袍的持续符光（激光）
+## 引力束甲的持续引力束
 ##
 ## 常驻挂在 Player 身上（作为子节点随玩家移动），开火时开启、过热时关闭，
 ## 不做对象池 —— 全程只有这一道。
@@ -13,7 +13,7 @@ var color: int = Game.YELLOW
 var dps := 120.0
 ## 由 Player 注入：命中特效的挂载容器
 var world: Node2D = null
-## 粗细系数：增攻符层数越多，光柱越粗（碰撞体同步加宽，不只是好看）
+## 粗细系数：增幅核心层数越多，光柱越粗（碰撞体同步加宽，不只是好看）
 var width_mul: float = 1.0
 ## 多道符光并排时各自的竖直偏移（由 Player 计算后传入）
 var y_off: float = 0.0
@@ -53,7 +53,7 @@ func turn_off() -> void:
 
 
 ## 由 Player 每帧调用：光柱自玩家身前一直探到屏幕右缘。
-## y_off 用于把叠出来的多道符光沿竖直方向铺开。
+## y_off 用于把叠出来的多道引力束沿竖直方向铺开。
 func aim(player_x: float, y: float = 0.0) -> void:
 	y_off = y
 	length = maxf(60.0, Game.VIEW_W + 20.0 - player_x)
@@ -99,7 +99,7 @@ func _draw() -> void:
 	var w := width_mul
 	var pulse := 0.5 + 0.5 * sin(_t * 18.0)
 
-	# 由外到内四层，越里越亮（粗细随增攻符放大）
+	# 由外到内四层，越里越亮（粗细随增幅核心放大）
 	draw_line(Vector2(-half, 0.0), Vector2(half, 0.0),
 		Color(g.r, g.g, g.b, 0.12), (26.0 + 4.0 * pulse) * w, true)
 	draw_line(Vector2(-half, 0.0), Vector2(half, 0.0),

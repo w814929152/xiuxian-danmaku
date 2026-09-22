@@ -1,6 +1,6 @@
-class_name RobeGallery
+class_name ArmorGallery
 extends Node2D
-## 道袍库：逐件翻阅四件道袍的形制、免疫属性与神通
+## 战甲库：逐件翻阅四件战甲的形制、免疫属性与战技
 ## ← → 或 1 / 2 / 3 / 4 切换，ESC / Enter 返回开始界面
 
 signal back_pressed()
@@ -82,9 +82,9 @@ func _draw() -> void:
 
 	draw_rect(Rect2(0.0, 0.0, W, H), Color(0.02, 0.02, 0.06, 0.46))
 
-	DrawUtil.txt(self, "道 袍 库", Vector2(W * 0.5, 92.0), 44,
+	DrawUtil.txt(self, "战 甲 库", Vector2(W * 0.5, 92.0), 44,
 		Color(1.0, 0.94, 0.76), HORIZONTAL_ALIGNMENT_CENTER)
-	DrawUtil.txt(self, "一袍一性，择其二而入劫 —— 免疫同色弹幕",
+	DrawUtil.txt(self, "一甲一性，择其二而出征 —— 免疫同色弹幕",
 		Vector2(W * 0.5, 132.0), 17, Color(0.86, 0.90, 1.0),
 		HORIZONTAL_ALIGNMENT_CENTER)
 
@@ -92,9 +92,9 @@ func _draw() -> void:
 	var lp := Rect2(90.0, 176.0, 470.0, 386.0)
 	draw_rect(lp, Color(0.03, 0.03, 0.08, 0.72))
 	draw_rect(lp, Color(m.r, m.g, m.b, 0.55), false, 2.0)
-	RobeArt.draw(self, Vector2(lp.position.x + lp.size.x * 0.5,
-		lp.position.y + lp.size.y * 0.48), c, _t, 6.0)
-	DrawUtil.txt(self, Game.ROBE_STORE[c],
+	ArmorArt.draw(self, Vector2(lp.position.x + lp.size.x * 0.5,
+		lp.position.y + lp.size.y * 0.48), c, _t, 2.15)
+	DrawUtil.txt(self, Game.ARMOR_STORE[c],
 		Vector2(lp.position.x + lp.size.x * 0.5, lp.position.y + lp.size.y - 26.0),
 		16, Color(m.r, m.g, m.b, 0.9), HORIZONTAL_ALIGNMENT_CENTER)
 
@@ -106,13 +106,13 @@ func _draw() -> void:
 
 	var px := rx + 40.0
 	var py := ry + 56.0
-	DrawUtil.txt(self, Game.ROBE_TITLE[c], Vector2(px, py), 40,
+	DrawUtil.txt(self, Game.ARMOR_TITLE[c], Vector2(px, py), 40,
 		Color(1.0, 0.97, 0.86))
 	DrawUtil.txt(self, "第 %d / %d 件" % [c + 1, TAB_N], Vector2(rx + 40.0, py + 34.0), 15,
 		Color(0.62, 0.68, 0.84))
 
 	# 已择标记
-	if Game.picked_robes.has(c):
+	if Game.picked_armors.has(c):
 		DrawUtil.txt(self, "· 当前已择 ·", Vector2(rx + 240.0, py - 6.0), 16,
 			Color(1.0, 0.90, 0.55))
 
@@ -124,14 +124,14 @@ func _draw() -> void:
 
 	# 神通
 	py += 52.0
-	var lines: PackedStringArray = str(Game.ROBE_DESC[c]).split("\n")
+	var lines: PackedStringArray = str(Game.ARMOR_DESC[c]).split("\n")
 	for j in lines.size():
 		DrawUtil.txt(self, "·  " + str(lines[j]), Vector2(px, py + float(j) * 30.0),
 			19, Color(0.90, 0.93, 1.0))
 
 	# 详述
 	py += float(lines.size()) * 30.0 + 26.0
-	var lore: PackedStringArray = str(Game.ROBE_LORE[c]).split("\n")
+	var lore: PackedStringArray = str(Game.ARMOR_LORE[c]).split("\n")
 	for j in lore.size():
 		DrawUtil.txt(self, str(lore[j]), Vector2(px, py + float(j) * 24.0),
 			15, Color(0.68, 0.73, 0.88))
@@ -146,15 +146,15 @@ func _draw() -> void:
 		draw_rect(r, Color(mc.r, mc.g, mc.b, 0.95 if act else (0.6 if hv else 0.35)),
 			false, 3.0 if act else 1.6)
 		draw_rect(Rect2(r.position.x, r.position.y, r.size.x, 5.0), mc)
-		DrawUtil.txt(self, Game.ROBE_TITLE[i],
+		DrawUtil.txt(self, Game.ARMOR_TITLE[i],
 			Vector2(r.position.x + r.size.x * 0.5, r.position.y + 30.0),
 			20 if act else 18, Color(1, 1, 1) if act else Color(0.72, 0.76, 0.88),
 			HORIZONTAL_ALIGNMENT_CENTER)
-		DrawUtil.txt(self, Game.ROBE_TAG[i],
+		DrawUtil.txt(self, Game.ARMOR_TAG[i],
 			Vector2(r.position.x + r.size.x * 0.5, r.position.y + 51.0),
 			13, Color(mc.r, mc.g, mc.b, 1.0 if act else 0.55),
 			HORIZONTAL_ALIGNMENT_CENTER)
-		if Game.picked_robes.has(i):
+		if Game.picked_armors.has(i):
 			DrawUtil.txt(self, "已择", Vector2(r.position.x + r.size.x - 12.0,
 				r.position.y + 28.0), 13, Color(1.0, 0.90, 0.55),
 				HORIZONTAL_ALIGNMENT_RIGHT)

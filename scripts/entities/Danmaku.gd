@@ -1,8 +1,8 @@
 class_name Danmaku
 extends Area2D
-## 敌方魔法弹（赤炎 / 玄冰 / 太清 / 戊土）
-## 四色共用同一张白模弹丸，运行期用 modulate 染属性色 —— 颜色是唯一区分维度。
-## （曾用四种外形，实测密集场里玩家在躲、没有余量辨轮廓，反而更难读。）
+## 敌方能量弹（电浆 / 寒霜 / 光子 / 引力）
+## 四色四形异形弹（火球 / 冰锥 / 灵环 / 符牌），纹理按属性色取自 ArtAssets。
+## 异形图自带颜色 —— 绝不能再用 modulate 染色，染了会把原色相叠脏。
 ##
 ## Phase 4：
 ##   · 走 Pool 对象池（Boss 弹幕高峰每秒数百颗，避免反复 new/free）
@@ -10,9 +10,12 @@ extends Area2D
 ##   · 位移迁到 _physics_process，低帧率下不再穿过玩家
 
 const POOL_KEY := "danmaku"
-## 弹丸纹理按「半径 = 9」1:1 烘焙（见 tools/build_sprites.py 的 danmaku 条目）。
-## 其余半径靠 scale 缩放；改烘焙尺寸必须同步这里，否则弹幕整体变大/变小。
-const ART_BASE_R := 9.0
+## 异形弹图按「半径 = 17」1:1 烘焙（34px 画布 / 2；源图已随 AI 源图目录丢失，
+## 现图由 9/16 导入缓存反解恢复，故无 build_sprites.py 条目可同步）。
+## 其余半径靠 scale 缩放；换图必须同步这里，否则弹幕整体变大/变小。
+## 注意：视觉半径 17 > 碰撞半径 9，判定不变 —— 视觉大于判定是初版手感的一部分，
+## 不要「顺手优化」成所见即所中。
+const ART_BASE_R := 17.0
 
 var color: int = Game.RED
 var vel := Vector2.ZERO
@@ -57,7 +60,7 @@ func _ready() -> void:
 	_shape.radius = radius
 	cs.shape = _shape
 	add_child(cs)
-	_art = ArtAssets.make_sprite("danmaku")
+	_art = ArtAssets.make_sprite("")
 	add_child(_art)
 	area_entered.connect(_on_area_entered)
 
@@ -80,14 +83,12 @@ func setup(c: int, p: Vector2, v: Vector2, d: int, r: float) -> void:
 	visible = true
 	if _shape != null:
 		_shape.radius = r
-	# sprite：四色同形白模弹丸，modulate 染属性色（颜色是唯一区分维度）；
-	# 纹理只有一张、_ready 时已设好，这里只改尺寸与染色
+	# sprite：四色四形异形弹，纹理按属性色切换（异形图自带颜色，不再染色）
 	if _art != null:
+		_art.texture = ArtAssets.by_color("danmaku", c)
 		_art.scale = Vector2.ONE * (r / ART_BASE_R)
-		_art.modulate = Game.COLOR_MAIN[c]
-	# 弹丸改为旋转对称圆形，spin 一律归零：
-	# NEAREST 过滤下旋转像素图会边缘抖动，而形状已不携带任何信息，自转纯属干扰。
-	# 属性含义仍由 color 承载（免疫判定 / 异色衰减 / 染色），与外观无关。
+	# spin 一律归零（池化复用必须覆盖上一颗弹留下的自转）：
+	# NEAREST 过滤下旋转像素图会边缘抖动；朝向信息由异形形状本身承载。
 
 
 func _physics_process(delta: float) -> void:
@@ -110,7 +111,7 @@ func _physics_process(delta: float) -> void:
 		_kill()
 
 
-## 被清屏 / 阶段转换时化为灵气
+## 被清屏 / 阶段转换时化为能量
 func dissolve() -> void:
 	if not _alive:
 		return

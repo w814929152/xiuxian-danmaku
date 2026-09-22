@@ -99,24 +99,24 @@ static func _accent(i: int) -> Color:
 static func _lines(i: int) -> PackedStringArray:
 	if i == Game.EASY:
 		return PackedStringArray([
-			"老祖元神  1400",
-			"法相  两重",
-			"属性法罩  无",
+			"始祖生命  1400",
+			"阶段  两重",
+			"属性护罩  无",
 			"弹幕密度  55%",
 			"狂暴  血量三成时",
 		])
 	if i == Game.HARD:
 		return PackedStringArray([
-			"老祖元神  3600",
-			"法相  三重",
-			"属性法罩  有（异色 60%）",
+			"始祖生命  3600",
+			"阶段  三重",
+			"属性护罩  有（异色 60%）",
 			"弹幕密度  100%",
 			"狂暴  血量三成时",
 		])
 	return PackedStringArray([
-		"老祖元神  2500",
-		"法相  三重",
-		"属性法罩  无",
+		"始祖生命  2500",
+		"阶段  三重",
+		"属性护罩  无",
 		"弹幕密度  80%",
 		"狂暴  血量三成时",
 	])
@@ -124,10 +124,10 @@ static func _lines(i: int) -> PackedStringArray:
 
 static func _tip(i: int) -> String:
 	if i == Game.EASY:
-		return "初入此道 · 弹幕稀疏，老祖不展法罩"
+		return "初入此道 · 弹幕稀疏，始祖不展护罩"
 	if i == Game.HARD:
-		return "异色飞剑只剩六成伤害 · 四色螺旋狂暴"
-	return "标准的问道之途 · 考验走位与换袍"
+		return "异色光刃只剩六成伤害 · 四色螺旋狂暴"
+	return "标准的出征之途 · 考验走位与换甲"
 
 
 func _draw() -> void:
@@ -138,7 +138,7 @@ func _draw() -> void:
 
 	DrawUtil.txt(self, "择 难 度", Vector2(W * 0.5, 100.0), 46,
 		Color(1.0, 0.94, 0.76), HORIZONTAL_ALIGNMENT_CENTER)
-	DrawUtil.txt(self, "三档只在老祖身上分高下 —— 妖潮一视同仁",
+	DrawUtil.txt(self, "三档只在始祖身上分高下 —— 星袭一视同仁",
 		Vector2(W * 0.5, 140.0), 18, Color(0.86, 0.90, 1.0),
 		HORIZONTAL_ALIGNMENT_CENTER)
 

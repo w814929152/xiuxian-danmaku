@@ -1,11 +1,11 @@
 extends Node2D
 ## 自动化冒烟测试（headless 运行用，验证完毕即删除）
-## 覆盖：三色免疫 / 护盾 / 十息回气 / 移速加成 / 关卡生成 / Boss 三阶段 / 法罩 / UI 全流程
-## 追加：戊土（黄）免疫 / 符光过热（+20 每秒 · 100 封顶 · 停手 0.5 秒后 -30 每秒）/ 戊土弹 -30 / 符光持续伤害
+## 覆盖：四色免疫 / 护盾 / 十息回盾 / 移速加成 / 关卡生成 / Boss 三阶段 / 护罩 / UI 全流程
+## 追加：引力（黄）免疫 / 引力束过热（+20 每秒 · 100 封顶 · 停手 0.5 秒后 -30 每秒）/ 引力弹 -30 / 引力束持续伤害
 
 var _fails: Array[String] = []
 var _finished := false
-## 妖将 killed 信号的接收记录（信号回调没法返回值，只能落到这里再断言）
+## 战将 killed 信号的接收记录（信号回调没法返回值，只能落到这里再断言）
 var _elite_killed := false
 var _elite_score := 0
 ## 结算界面 swap_pressed 的接收记录（GDScript 的 lambda 捕获局部变量是值捕获，
@@ -74,14 +74,14 @@ func _test_ui_flow() -> void:
 	await _frames(3)
 	_ck(m.current is TitleScreen, "启动 -> 开始界面")
 
-	# 菜单第二项：道袍库
+	# 菜单第二项：战甲库
 	await _press("mv_down")
 	await _press("confirm")
-	_ck(m.current is RobeGallery, "菜单 ↓ + 确认 -> 道袍库")
+	_ck(m.current is ArmorGallery, "菜单 ↓ + 确认 -> 战甲库")
 	await _press("mv_right")
 	await _press("pick_1")
 	await _press("cancel")
-	_ck(m.current is TitleScreen, "道袍库 ESC -> 回到开始界面")
+	_ck(m.current is TitleScreen, "战甲库 ESC -> 回到开始界面")
 
 	# 数字键 3 直达：游戏说明
 	await _press("pick_2")
@@ -94,14 +94,14 @@ func _test_ui_flow() -> void:
 	_ck(m.current is DifficultySelect, "确认 -> 择难度界面")
 	await _press("pick_1")                      # 数字键 2 = 普通
 	_ck(Game.difficulty == Game.NORMAL, "数字键 2 -> 记下【普通】难度")
-	_ck(m.current is RobeSelect, "择难度确认 -> 择道袍界面")
+	_ck(m.current is ArmorSelect, "择难度确认 -> 择战甲界面")
 
 	await _press("pick_0")
 	await _press("pick_2")
 	await _press("confirm")
 	await _frames(4)
-	_ck(m.current is Level, "选满两件道袍 -> 进入关卡")
-	_ck(Game.picked_robes == [Game.RED, Game.WHITE], "记录所选两色 = 赤炎 + 太清")
+	_ck(m.current is Level, "选满两件战甲 -> 进入关卡")
+	_ck(Game.picked_armors == [Game.RED, Game.WHITE], "记录所选两色 = 电浆 + 光子")
 
 	var lv: Level = m.current as Level
 	if lv != null:
@@ -127,10 +127,10 @@ func _test_player() -> void:
 	var p := Player.new()
 	p.world = self
 	add_child(p)
-	p.robes = [Game.WHITE, Game.RED]
-	p.robe_idx = 0
+	p.armors = [Game.WHITE, Game.RED]
+	p.armor_idx = 0
 	await _frames(2)
-	_ck(p.color == Game.WHITE, "初始皮肤 = 太清(白)")
+	_ck(p.color == Game.WHITE, "初始皮肤 = 光子(白)")
 
 	var used := p.take_hit(Game.WHITE, 10)
 	_ck(used == true, "白皮肤吸收白弹（弹幕消失）")
@@ -152,15 +152,15 @@ func _test_player() -> void:
 	_ck(p.shield == Player.SHIELD_MAX, "十息（10 秒）无伤 -> 护盾回满")
 
 	p.do_swap()
-	_ck(p.color == Game.RED, "空格切换 -> 赤炎(红)")
+	_ck(p.color == Game.RED, "空格切换 -> 电浆(红)")
 	p._invuln = 0.0
 	_ck(p.take_hit(Game.RED, 10) == true, "红皮肤吸收红弹（弹幕消失）")
 	p._invuln = 0.0
 	_ck(p.take_hit(Game.BLUE, 10) == true, "红皮肤吃蓝弹并扣血")
 
 	# 移速：红 vs 蓝
-	p.robes = [Game.RED, Game.BLUE]
-	p.robe_idx = 0
+	p.armors = [Game.RED, Game.BLUE]
+	p.armor_idx = 0
 	p.hp = Player.MAX_HP
 	p.position = Vector2(300.0, 360.0)
 	await _frames(2)
@@ -169,7 +169,7 @@ func _test_player() -> void:
 	await _frames(12)
 	var d_red := p.position.x - x0
 	p.do_swap()
-	_ck(p.color == Game.BLUE, "切换 -> 玄冰(蓝)")
+	_ck(p.color == Game.BLUE, "切换 -> 寒霜(蓝)")
 	var x1 := p.position.x
 	await _frames(12)
 	var d_blue := p.position.x - x1
@@ -184,8 +184,8 @@ func _test_player() -> void:
 	# 只断言 take_hit 的返回值是不够的 —— 真正要保证的是那颗弹真的从场上消失了。
 	# 这里让一颗同色弹压在玩家身上，看它有没有被 _kill 掉。
 	p._invuln = 0.0
-	p.robes = [Game.RED, Game.BLUE]
-	p.robe_idx = 0
+	p.armors = [Game.RED, Game.BLUE]
+	p.armor_idx = 0
 	p.position = Vector2(400.0, 360.0)
 	await _frames(2)
 	var hp_before := p.hp
@@ -196,19 +196,19 @@ func _test_player() -> void:
 			if not bd._alive:
 				break
 			await get_tree().physics_frame
-		_ck(not bd._alive, "同色弹被道袍吸收 -> 弹幕消失（不再穿过）")
+		_ck(not bd._alive, "同色弹被战甲吸收 -> 弹幕消失（不再穿过）")
 	_ck(p.hp == hp_before, "吸收同色弹不掉血")
-	# 对照组：无量罩期间仍是「穿过」而非吸收 —— 这条别被上面的改动带偏
+	# 对照组：力场罩期间仍是「穿过」而非吸收 —— 这条别被上面的改动带偏
 	p._invuln = 0.0
 	p.apply_pickup(Pickup.T.INVINC)
 	var bi := Danmaku.spawn(self, Game.BLUE, p.position, Vector2.ZERO, 10, 9.0)
-	_ck(bi != null, "无量罩对照：测试弹生成成功")
+	_ck(bi != null, "力场罩对照：测试弹生成成功")
 	if bi != null:
 		for _j in 12:
 			await get_tree().physics_frame
 			if not bi._alive:
 				break
-		_ck(bi._alive, "无量罩期间弹幕仍穿过（未被吸收）")
+		_ck(bi._alive, "力场罩期间弹幕仍穿过（未被吸收）")
 		bi.dissolve()
 	p.invinc = 0.0
 	await _frames(2)
@@ -217,21 +217,21 @@ func _test_player() -> void:
 	await _frames(2)
 
 
-# ------------------------------------------------------------ 戊土（黄）
+# ------------------------------------------------------------ 引力（黄）
 func _test_yellow() -> void:
 	print("------ yellow / heat ------")
 	Game.difficulty = Game.NORMAL
 	var p := Player.new()
 	p.world = self
 	add_child(p)
-	p.robes = [Game.YELLOW, Game.RED]
-	p.robe_idx = 0
+	p.armors = [Game.YELLOW, Game.RED]
+	p.armor_idx = 0
 	await _frames(2)
-	_ck(p.color == Game.YELLOW, "换上戊土符袍(黄)")
+	_ck(p.color == Game.YELLOW, "换上引力束甲(黄)")
 
 	p._invuln = 0.0
-	_ck(p.take_hit(Game.YELLOW, 10) == true, "戊土符袍吸收戊土弹（弹幕消失）")
-	_ck(p.hp == Player.MAX_HP, "吸收戊土弹不掉血")
+	_ck(p.take_hit(Game.YELLOW, 10) == true, "引力束甲吸收引力弹（弹幕消失）")
+	_ck(p.hp == Player.MAX_HP, "吸收引力弹不掉血")
 
 	# 过热：出光每秒 +20，封顶 100
 	p.heat = 0.0
@@ -252,34 +252,34 @@ func _test_yellow() -> void:
 	_ck(absf(p.heat - 55.0) < 0.01, "再散热 1 秒 -> 85 降至 55")
 	_ck(p.can_fire(), "散到解锁阈值以下 -> 恢复出光")
 
-	# 触及戊土弹 -> 立刻散去 30
+	# 触及引力弹 -> 立刻散去 30
 	p.heat = 80.0
 	p._invuln = 0.0
 	p.take_hit(Game.YELLOW, 10)
-	_ck(absf(p.heat - 50.0) < 0.01, "触及戊土弹 -> 过热值立刻 -30")
+	_ck(absf(p.heat - 50.0) < 0.01, "触及引力弹 -> 过热值立刻 -30")
 	p.queue_free()
 	await _frames(2)
 
-	# 戊土妖：会射出戊土符弹
+	# 引力星盗：会射出引力弹
 	var ey := Enemy.new()
 	ey.world = self
 	add_child(ey)
 	ey.setup(Game.YELLOW, "sine", 300.0, 1.0)
 	ey._entered = true
-	_ck(ey.max_hp == 30 and ey.fire_cd > 1.5, "戊土妖数值生效（血 30 / 射速偏慢）")
+	_ck(ey.max_hp == 30 and ey.fire_cd > 1.5, "引力星盗数值生效（血 30 / 射速偏慢）")
 	ey._shoot()
 	var ny := 0
 	for ch in get_children():
 		if ch is Danmaku and (ch as Danmaku).color == Game.YELLOW:
 			ny += 1
-	_ck(ny == 3, "戊土妖一次射出 3 枚戊土符弹")
+	_ck(ny == 3, "引力星盗一次射出 3 枚引力弹")
 	for ch in get_children():
 		if ch is Danmaku:
 			(ch as Danmaku).dissolve()
 	ey.queue_free()
 	await _frames(2)
 
-	# 符光：持续结算伤害（不是弹丸，而是压在光柱上按 tick 掉血）
+	# 引力束：持续结算伤害（不是弹丸，而是压在光柱上按 tick 掉血）
 	var e := Enemy.new()
 	e.world = self
 	add_child(e)
@@ -301,14 +301,14 @@ func _test_yellow() -> void:
 		beamed = e.dead or e.hp < hp0
 	else:
 		beamed = true      # 已被 queue_free 说明确实被打死了
-	_ck(beamed, "符光（激光）持续结算伤害")
+	_ck(beamed, "引力束（激光）持续结算伤害")
 	bm.turn_off()
 	bm.queue_free()
 	if is_instance_valid(e):
 		e.queue_free()
 	await _frames(2)
 
-	# hover 骚扰妖离场是向右飞出画面的：出右边界必须自我回收，
+	# hover 骚扰敌离场是向右飞出画面的：出右边界必须自我回收，
 	# 否则它永远等不到 free，清场判定会被一路拖到上限（同色潮每重必有 hover）。
 	var eh := Enemy.new()
 	eh.world = self
@@ -317,7 +317,7 @@ func _test_yellow() -> void:
 	eh._leaving = true
 	eh.position = Vector2(Game.VIEW_W + 200.0, 360.0)
 	await _frames(3)
-	_ck(not is_instance_valid(eh), "hover 妖向右飞出画面 -> 自动回收")
+	_ck(not is_instance_valid(eh), "hover 敌向右飞出画面 -> 自动回收")
 	# 对照组：还在逼近 / 驻留的目标色绝不能被这条规则误删
 	var ea := Enemy.new()
 	ea.world = self
@@ -325,7 +325,7 @@ func _test_yellow() -> void:
 	ea.setup(Game.BLUE, "hover", 360.0, 1.0)
 	ea.position = Vector2(Game.VIEW_W - 60.0, 360.0)
 	await _frames(3)
-	_ck(is_instance_valid(ea), "未离场的 hover 妖不被误回收")
+	_ck(is_instance_valid(ea), "未离场的 hover 敌不被误回收")
 	if is_instance_valid(ea):
 		ea.queue_free()
 	await _frames(2)
@@ -356,12 +356,12 @@ func _test_pickup() -> void:
 		return
 	# 入树是延后一帧的（见 Pickup.spawn 注释），_ready 里的碰撞设置要等它进树才生效
 	await _frames(3)
-	_ck(pk.collision_layer == 16, "道具在碰撞层 bit4（飞剑与敌弹都不会误触）")
+	_ck(pk.collision_layer == 16, "道具在碰撞层 bit4（光刃与敌弹都不会误触）")
 	var px0 := pk.position.x
 	await _frames(8)
 	_ck(pk.position.x < px0, "道具向左漂浮")
 
-	# 掉落常常发生在**物理回调里**（飞剑命中 -> 小妖死亡 -> 关卡掉落）。
+	# 掉落常常发生在**物理回调里**（光刃命中 -> 星盗死亡 -> 关卡掉落）。
 	# 用一对真实重叠的 Area2D 把 Pickup.spawn 塞进 area_entered —— 那正是
 	# "flushing queries" 阶段，能确定性复现
 	# "Can't change this state while flushing queries"（否则只能靠 18% 概率撞上）。
@@ -382,74 +382,74 @@ func _test_pickup() -> void:
 	var p := Player.new()
 	p.world = self
 	add_child(p)
-	p.robes = [Game.WHITE, Game.RED]
-	p.robe_idx = 0
-	p.shield = 0        # 关掉罡气，扣血才可预期
+	p.armors = [Game.WHITE, Game.RED]
+	p.armor_idx = 0
+	p.shield = 0        # 关掉护盾，扣血才可预期
 	await _frames(2)
 
-	# 回春丹
+	# 修复包
 	p.hp = 50
 	p.apply_pickup(Pickup.T.HEAL)
-	_ck(p.hp == 70, "回春丹 -> 元神 +20")
+	_ck(p.hp == 70, "修复包 -> 生命 +20")
 	p.hp = 95
 	p.apply_pickup(Pickup.T.HEAL)
-	_ck(p.hp == Player.MAX_HP, "回春丹不会超出元神上限")
+	_ck(p.hp == Player.MAX_HP, "修复包不会超出生命上限")
 
-	# 剑影符
-	_ck(p.rows() == 1, "太清罡袍基准单排弹道")
+	# 刃影模块
+	_ck(p.rows() == 1, "光子盾甲基准单排弹道")
 	p.apply_pickup(Pickup.T.MULTI)
-	_ck(p.multi == 1 and p.rows() == 2, "剑影符 -> 弹道 +1")
-	p.robe_idx = 1
-	_ck(p.rows() == 3, "赤炎剑袍双排 + 剑影符 = 三排")
-	p.robe_idx = 0
+	_ck(p.multi == 1 and p.rows() == 2, "刃影模块 -> 弹道 +1")
+	p.armor_idx = 1
+	_ck(p.rows() == 3, "电浆剑甲双排 + 刃影模块 = 三排")
+	p.armor_idx = 0
 
-	# 增攻符
-	_ck(p.sword_damage() == 10, "基准飞剑伤害 10")
+	# 增幅核心
+	_ck(p.sword_damage() == 10, "基准光刃伤害 10")
 	p.apply_pickup(Pickup.T.ATK)
-	_ck(absf(p.atk_mul - 1.30) < 0.001, "增攻符 -> 攻击力 +30%")
-	_ck(p.sword_damage() == 13, "飞剑伤害 10 -> 13")
-	_ck(p.sword_size() > 1.0, "飞剑变大（外观与碰撞体同步）")
-	_ck(p.beam_width() > 1.0, "符光变粗")
-	_ck(absf(p.beam_dps() - 120.0 * 1.3) < 0.01, "符光每秒伤害同步提高到 156")
+	_ck(absf(p.atk_mul - 1.30) < 0.001, "增幅核心 -> 攻击力 +30%")
+	_ck(p.sword_damage() == 13, "光刃伤害 10 -> 13")
+	_ck(p.sword_size() > 1.0, "光刃变大（外观与碰撞体同步）")
+	_ck(p.beam_width() > 1.0, "引力束变粗")
+	_ck(absf(p.beam_dps() - 120.0 * 1.3) < 0.01, "引力束每秒伤害同步提高到 156")
 
 	# 层数封顶
 	for _i in 8:
 		p.apply_pickup(Pickup.T.MULTI)
 		p.apply_pickup(Pickup.T.ATK)
-	_ck(p.multi == Player.MULTI_MAX, "剑影符层数封顶 %d 层" % Player.MULTI_MAX)
-	_ck(p.atk_up == Player.ATK_MAX, "增攻符层数封顶 %d 层" % Player.ATK_MAX)
+	_ck(p.multi == Player.MULTI_MAX, "刃影模块层数封顶 %d 层" % Player.MULTI_MAX)
+	_ck(p.atk_up == Player.ATK_MAX, "增幅核心层数封顶 %d 层" % Player.ATK_MAX)
 
-	# 无量罩
+	# 力场罩
 	p.invinc = 0.0
 	p.apply_pickup(Pickup.T.INVINC)
-	_ck(absf(p.invinc - Player.INVINC_TIME) < 0.001, "无量罩 -> 无敌 6 秒")
+	_ck(absf(p.invinc - Player.INVINC_TIME) < 0.001, "力场罩 -> 无敌 6 秒")
 	p.hp = 100
 	p._invuln = 0.0
-	_ck(p.take_hit(Game.RED, 10) == false, "无量罩期间免伤（弹幕穿过）")
-	_ck(p.hp == 100, "无量罩期间不掉血")
+	_ck(p.take_hit(Game.RED, 10) == false, "力场罩期间免伤（弹幕穿过）")
+	_ck(p.hp == 100, "力场罩期间不掉血")
 	p.invinc = 0.0
 	p._invuln = 0.0
-	_ck(p.take_hit(Game.RED, 10) == true, "无量罩失效后恢复正常受击")
+	_ck(p.take_hit(Game.RED, 10) == true, "力场罩失效后恢复正常受击")
 	_ck(p.hp == 90, "失效后正常扣血")
 
-	# 戊土符袍：剑影符 -> 多一道符光，且**不额外增加过热值**
-	p.robes = [Game.YELLOW, Game.RED]
-	p.robe_idx = 0
+	# 引力束甲：刃影模块 -> 多一道引力束，且**不额外增加过热值**
+	p.armors = [Game.YELLOW, Game.RED]
+	p.armor_idx = 0
 	p.multi = 1
 	await _frames(2)
-	_ck(p.rows() == 2, "戊土符袍 + 剑影符 = 两道符光")
+	_ck(p.rows() == 2, "引力束甲 + 刃影模块 = 两道引力束")
 	p._beam_on()
 	var on_n := 0
 	for b in p._beams:
 		if b.on:
 			on_n += 1
-	_ck(on_n == 2, "实际点亮两道符光")
+	_ck(on_n == 2, "实际点亮两道引力束")
 	p._beam_off()
 	var off_n := 0
 	for b2 in p._beams:
 		if b2.on:
 			off_n += 1
-	_ck(off_n == 0, "停手后符光全部熄灭")
+	_ck(off_n == 0, "停手后引力束全部熄灭")
 
 	# 加排只加伤害，不加发热 —— 这是需求里明确点名的
 	p.multi = 0
@@ -462,7 +462,7 @@ func _test_pickup() -> void:
 	p._update_heat(1.0)
 	var h2 := p.heat
 	_ck(absf(h1 - 20.0) < 0.01, "单道出光 1 秒 -> 过热值 +20")
-	_ck(absf(h1 - h2) < 0.01, "剑影符加排不额外增加过热值（%d -> %d）" % [int(h1), int(h2)])
+	_ck(absf(h1 - h2) < 0.01, "刃影模块加排不额外增加过热值（%d -> %d）" % [int(h1), int(h2)])
 	p._firing = false
 
 	# ---------- 玩家碰到道具 ----------
@@ -480,7 +480,7 @@ func _test_pickup() -> void:
 	await _frames(2)
 
 	# ---------- 掉落源 ----------
-	Game.picked_robes = [Game.RED, Game.WHITE]
+	Game.picked_armors = [Game.RED, Game.WHITE]
 	var lv := Level.new()
 	add_child(lv)
 	lv._running = false      # 别让波次真的跑起来，只测掉落
@@ -500,7 +500,7 @@ func _test_pickup() -> void:
 			n1 += 1
 	_ck(n1 - n0 == Level.WAVE_DROP,
 		"每波结束刷新 %d 个道具（实测 %d 个）" % [Level.WAVE_DROP, n1 - n0])
-	_ck(not lv.has_method("_heal"), "波次结束不再回血（_heal 已移除，元神只靠回春丹）")
+	_ck(not lv.has_method("_heal"), "波次结束不再回血（_heal 已移除，生命只靠修复包）")
 
 	# 掉落是概率的：18% 连掉 60 次一次都不出的概率约 6e-6，够确定
 	var hits := 0
@@ -517,12 +517,12 @@ func _test_pickup() -> void:
 				a1 += 1
 		if a1 > a0:
 			hits += 1
-	_ck(hits > 0, "击杀小妖会掉落道具（60 次命中 %d 次）" % hits)
+	_ck(hits > 0, "击杀星盗会掉落道具（60 次命中 %d 次）" % hits)
 	lv.queue_free()
 	await _frames(3)
 
 
-# ------------------------------------------------------------ 护法妖将（精英）
+# ------------------------------------------------------------ 星盗战将（精英）
 func _on_elite_probe(_pos: Vector2, _c: int, sc: int) -> void:
 	_elite_killed = true
 	_elite_score = sc
@@ -545,40 +545,40 @@ func _find_elite(n: Node) -> Elite:
 
 func _test_elite() -> void:
 	print("------ elite ------")
-	Game.picked_robes = [Game.RED, Game.WHITE]
+	Game.picked_armors = [Game.RED, Game.WHITE]
 	var e := Elite.new()
 	e.world = self
 	add_child(e)
-	e.player_robes = [Game.RED, Game.WHITE]
+	e.player_armors = [Game.RED, Game.WHITE]
 	e.setup(1.0)
 	await _frames(2)
 	_ck(e.color == Game.RED or e.color == Game.WHITE,
-		"法罡色只从玩家两件道袍中抽取（抽到 %s）" % Game.COLOR_CN[e.color])
+		"力场色只从玩家两件战甲中抽取（抽到 %s）" % Game.COLOR_CN[e.color])
 	_ck(e.collision_layer == 4 and e.collision_mask == 2,
-		"妖将与小妖同层（bit2，只吃 bit1 飞剑）")
-	_ck(e.ward == e.ward_max and e.hp == e.max_hp, "出场即带满层法罡")
+		"战将与星盗同层（bit2，只吃 bit1 光刃）")
+	_ck(e.ward == e.ward_max and e.hp == e.max_hp, "出场即带满层力场")
 	_ck(e.max_hp > 400 and e.ward_max > 100,
-		"血厚于小妖（本体 %d / 法罡 %d）" % [e.max_hp, e.ward_max])
+		"血厚于星盗（本体 %d / 力场 %d）" % [e.max_hp, e.ward_max])
 
-	# ---------- 法罡分层：异色刮痧，且破罡前本体不掉血 ----------
+	# ---------- 力场分层：异色刮痧，且破罡前本体不掉血 ----------
 	var off := (e.color + 1) % 4
 	var hp0 := e.hp
 	var w0 := e.ward
 	e.hit(100, off)
 	var d_off := w0 - e.ward
-	_ck(e.hp == hp0, "法罡未破时本体不掉血")
+	_ck(e.hp == hp0, "力场未破时本体不掉血")
 	_ck(d_off == int(roundf(100.0 * Elite.WARD_RESIST)),
-		"异色打法罡只剩 %d%%（100 -> %d）" % [int(Elite.WARD_RESIST * 100.0), d_off])
-	# 用 20 点试同色：100 点同色打出来是 150，会一击打爆 150 的法罡 ——
+		"异色打力场只剩 %d%%（100 -> %d）" % [int(Elite.WARD_RESIST * 100.0), d_off])
+	# 用 20 点试同色：100 点同色打出来是 150，会一击打爆 150 的力场 ——
 	# 那测的就不是衰减比例而是「恰好破罡」了
 	e.ward = w0
 	e.hit(20, e.color)
-	_ck(w0 - e.ward == 30, "同色打法罡全额 +50%%（20 -> %d）" % (w0 - e.ward))
+	_ck(w0 - e.ward == 30, "同色打力场全额 +50%%（20 -> %d）" % (w0 - e.ward))
 
 	# ---------- 破罡 -> 虚弱 ----------
 	e.ward = 10
 	e.hit(50, e.color)
-	_ck(e.ward == 0 and e.broken > 0.0, "法罡击破 -> 进入虚弱期")
+	_ck(e.ward == 0 and e.broken > 0.0, "力场击破 -> 进入虚弱期")
 	_ck(e.layers == Elite.WARD_LAYERS - 1, "破一层扣一次重铸机会（余 %d 次）" % e.layers)
 	var h1 := e.hp
 	e.hit(100, off)
@@ -590,7 +590,7 @@ func _test_elite() -> void:
 	# ---------- 重铸与永久破防 ----------
 	e.broken = 0.001
 	await _frames(4)
-	_ck(e.ward == e.ward_max, "虚弱结束 -> 法罡重铸（余 %d 次）" % e.layers)
+	_ck(e.ward == e.ward_max, "虚弱结束 -> 力场重铸（余 %d 次）" % e.layers)
 	_ck(e.broken <= 0.0, "重铸后虚弱计时归零")
 	e.ward = 0
 	e.layers = 0
@@ -598,7 +598,7 @@ func _test_elite() -> void:
 	await _frames(4)
 	_ck(e.ward == 0 and e.broken <= 0.0, "重铸次数用尽 -> 永久破防")
 
-	# ---------- 走真实飞剑链路：Sword 只认 Damageable ----------
+	# ---------- 走真实光刃链路：Sword 只认 Damageable ----------
 	e.position = Vector2(600.0, 300.0)
 	e._base_y = 300.0
 	e._home_x = 600.0
@@ -611,7 +611,7 @@ func _test_elite() -> void:
 			break
 		await get_tree().physics_frame
 	_ck(e.ward < w1 or e.hp < h3,
-		"飞剑可命中妖将（走 Damageable 判定，Sword 无需改动）")
+		"光刃可命中战将（走 Damageable 判定，Sword 无需改动）")
 
 	# ---------- 斩杀 ----------
 	_elite_killed = false
@@ -619,7 +619,7 @@ func _test_elite() -> void:
 	e.killed.connect(_on_elite_probe)
 	e.hp = 40
 	e.hit(60, e.color)
-	_ck(_elite_killed, "斩杀妖将 -> 发出 killed 信号")
+	_ck(_elite_killed, "斩杀战将 -> 发出 killed 信号")
 	_ck(_elite_score == Elite.SCORE, "斩杀奖励 %d 分" % Elite.SCORE)
 	_ck(e.dead, "死亡标记已置位（清场判定据此放行）")
 	await _frames(2)
@@ -633,17 +633,17 @@ func _test_elite() -> void:
 	lv._spawn_elite(1.15)
 	await _frames(3)
 	var el := _find_elite(lv)
-	_ck(el != null, "关卡可生成护法妖将")
+	_ck(el != null, "关卡可生成星盗战将")
 	if el != null:
-		_ck(el.player_robes.size() == 2, "妖将拿到玩家道袍（法罡只从中抽取）")
+		_ck(el.player_armors.size() == 2, "战将拿到玩家战甲（力场只从中抽取）")
 		_ck(el.max_hp > Elite.BASE_HP, "血量按波次系数缩放（第 2 重 %d）" % el.max_hp)
-		_ck(lv._elite_alive(), "清场判定认得妖将（在场即算未清空）")
+		_ck(lv._elite_alive(), "清场判定认得战将（在场即算未清空）")
 		el.ward = 0
 		el.hp = 1
 		el.hit(50, el.color)
 		await _frames(4)
-		_ck(_count_pickups(lv) == n0 + 1, "斩杀妖将必掉一件道具")
-		_ck(not lv._elite_alive(), "妖将阵亡后清场放行")
+		_ck(_count_pickups(lv) == n0 + 1, "斩杀战将必掉一件道具")
+		_ck(not lv._elite_alive(), "战将阵亡后清场放行")
 	lv.queue_free()
 	await _frames(3)
 
@@ -680,13 +680,13 @@ func _test_pool() -> void:
 # ------------------------------------------------------------ 关卡
 func _test_level() -> void:
 	print("------ level ------")
-	Game.picked_robes = [Game.RED, Game.WHITE]
+	Game.picked_armors = [Game.RED, Game.WHITE]
 	var lv := Level.new()
 	add_child(lv)
 	await _frames(3)
 	_ck(lv.player != null and is_instance_valid(lv.player), "关卡创建玩家")
 	_ck(lv.hud != null, "关卡创建 HUD")
-	_ck(lv.player.robes.size() == 2, "玩家携带两件道袍")
+	_ck(lv.player.armors.size() == 2, "玩家携带两件战甲")
 
 	Engine.time_scale = 4.0
 	Input.action_press("shoot")
@@ -710,7 +710,7 @@ func _test_level() -> void:
 	Engine.time_scale = 1.0
 	await _frames(3)
 
-	# _enemy_count 是「全场计数」（不做视野过滤）：必须能看到 hover 骚扰妖飞出右边界
+	# _enemy_count 是「全场计数」（不做视野过滤）：必须能看到 hover 骚扰敌飞出右边界
 	# 后的自我回收，否则每重都会白等清场上限。这里跑一遍真实离场流程验证计数归零。
 	var lv2 := Level.new()
 	add_child(lv2)
@@ -732,12 +732,12 @@ func _test_level() -> void:
 	Engine.time_scale = 1.0
 	var n_after := lv2._enemy_count()
 	_ck(n_before == 1 and n_after == 0,
-		"hover 骚扰妖离场后 _enemy_count 归零（离场前 %d / 离场后 %d）" % [n_before, n_after])
+		"hover 骚扰敌离场后 _enemy_count 归零（离场前 %d / 离场后 %d）" % [n_before, n_after])
 	lv2.queue_free()
 	await _frames(3)
 
 
-# ------------------------------------------------------------ 妖潮「同色潮」配色
+# ------------------------------------------------------------ 星袭「同色潮」配色
 ## 断言文案里挂反例组合；没反例就返回空串
 func _bad(s: String) -> String:
 	if s.is_empty():
@@ -745,9 +745,9 @@ func _bad(s: String) -> String:
 	return "  <- 反例 " + s
 
 
-func _robe_cn(robes: Array[int]) -> String:
+func _armor_cn(armors: Array[int]) -> String:
 	var s := ""
-	for c in robes:
+	for c in armors:
 		if not s.is_empty():
 			s += " + "
 		s += Game.COLOR_CN[c]
@@ -765,8 +765,8 @@ func _strict_alt(tgt: Array[int], a: int, b: int) -> bool:
 	return true
 
 
-## 配色随玩家道袍 S 对称生成：目标色 ∈ S、骚扰色 ∈ S'。
-## 六种道袍组合 × 每种摇 20 次（序列生成带随机，只跑一次盖不住）。
+## 配色随玩家战甲 S 对称生成：目标色 ∈ S、骚扰色 ∈ S'。
+## 六种战甲组合 × 每种摇 20 次（序列生成带随机，只跑一次盖不住）。
 func _test_wave_colors() -> void:
 	print("------ wave colors ------")
 	var f_cnt := ""
@@ -780,18 +780,18 @@ func _test_wave_colors() -> void:
 		for b in 4:
 			if b <= a:
 				continue
-			var robes: Array[int] = [a, b]
-			var cn := _robe_cn(robes)
-			var comp := Level._complement(robes)
+			var armors: Array[int] = [a, b]
+			var cn := _armor_cn(armors)
+			var comp := Level._complement(armors)
 			if comp.size() != 2:
 				_ck(false, "S' 补集应为 2 色（%s 实测 %d）" % [cn, comp.size()])
 				continue
 			var h2: int = comp[0]
 			var h3: int = comp[1]
 			for _rep in 20:
-				var w1 := Level._wave_colors(1, robes, h2, h3)
-				var w2 := Level._wave_colors(2, robes, h2, h3)
-				var w3 := Level._wave_colors(3, robes, h2, h3)
+				var w1 := Level._wave_colors(1, armors, h2, h3)
+				var w2 := Level._wave_colors(2, armors, h2, h3)
+				var w3 := Level._wave_colors(3, armors, h2, h3)
 				# 只数 5 / 7 / 8 = 20：这是 P0-1 满分（9800）的基数，不能漂
 				if w1.size() != 5 or w2.size() != 7 or w3.size() != 8:
 					if f_cnt.is_empty():
@@ -853,7 +853,7 @@ func _test_wave_colors() -> void:
 	add_child(lv)
 	lv._running = false
 	await _frames(3)
-	lv.player.robes = [Game.RED, Game.WHITE]
+	lv.player.armors = [Game.RED, Game.WHITE]
 	lv._plan_harass()
 	var h2v: int = lv._harass[0]
 	var h3v: int = lv._harass[1]
@@ -895,8 +895,8 @@ func _test_wave_colors() -> void:
 # ------------------------------------------------------------ Boss
 func _test_boss() -> void:
 	print("------ boss ------")
-	Game.difficulty = Game.HARD      # 属性法罩只有困难档才有
-	Game.picked_robes = [Game.RED, Game.BLUE]
+	Game.difficulty = Game.HARD      # 属性护罩只有困难档才有
+	Game.picked_armors = [Game.RED, Game.BLUE]
 	var lv := Level.new()
 	add_child(lv)
 	await _frames(3)
@@ -909,7 +909,7 @@ func _test_boss() -> void:
 	if b == null or not is_instance_valid(b):
 		_ck(false, "Boss 生成失败")
 		return
-	_ck(b.player_robes.size() == 2, "Boss 拿到玩家道袍（法罩只从中抽取）")
+	_ck(b.player_armors.size() == 2, "Boss 拿到玩家战甲（护罩只从中抽取）")
 
 	Engine.time_scale = 2.0
 	Input.action_press("shoot")
@@ -937,7 +937,7 @@ func _test_boss() -> void:
 	Engine.time_scale = 1.0
 	_ck(seen.has(2), "Boss 进入第 2 阶段")
 	_ck(seen.has(3), "Boss 进入第 3 阶段")
-	_ck(ward_seen >= 1, "属性法罩已展开（%d 次）" % ward_seen)
+	_ck(ward_seen >= 1, "属性护罩已展开（%d 次）" % ward_seen)
 	_ck(lv.player != null and is_instance_valid(lv.player), "玩家在 Boss 战中存活")
 	lv.queue_free()
 	await _frames(3)
@@ -947,7 +947,7 @@ func _test_boss() -> void:
 func _test_difficulty() -> void:
 	print("------ difficulty ------")
 
-	# ---- 简单：血 1000 / 两重法相 / 无法罩
+	# ---- 简单：血 1000 / 两重阶段 / 无护罩
 	Game.difficulty = Game.EASY
 	var lv := Level.new()
 	add_child(lv)
@@ -964,22 +964,22 @@ func _test_difficulty() -> void:
 		Engine.time_scale = 1.0
 		lv.queue_free()
 		return
-	# 老祖要从屏幕外飘到站位才进 fight。headless 帧率约 140fps（浮动很大），
+	# 始祖要从屏幕外飘到站位才进 fight。headless 帧率约 140fps（浮动很大），
 	# 按帧数折算游戏时间会差好几倍 —— 改成轮询状态而不是数帧。
 	for _i in 400:
 		if b._st == "fight":
 			break
 		await get_tree().process_frame
-	_ck(b._st == "fight", "简单：老祖入场到位（进入 fight）")
-	_ck(b.max_hp == 1400, "简单：老祖血量 1400（提血后够走完三幕）")
-	_ck(b.phase_marks().size() == 1, "简单：两重法相（一条阶段刻度）")
-	await _frames(300)          # 跨过首个法罩周期（约 4 秒）
+	_ck(b._st == "fight", "简单：始祖入场到位（进入 fight）")
+	_ck(b.max_hp == 1400, "简单：始祖血量 1400（提血后够走完三幕）")
+	_ck(b.phase_marks().size() == 1, "简单：两重阶段（一条阶段刻度）")
+	await _frames(300)          # 跨过首个护罩周期（约 4 秒）
 	Engine.time_scale = 1.0
-	_ck(b.ward < 0, "简单：老祖始终不展法罩")
+	_ck(b.ward < 0, "简单：始祖始终不展护罩")
 	lv.queue_free()
 	await _frames(3)
 
-	# ---- 困难：血 3600 / 三重法相 / 有法罩 / 异色 60% / 狂暴
+	# ---- 困难：血 3600 / 三重阶段 / 有护罩 / 异色 60% / 狂暴
 	Game.difficulty = Game.HARD
 	var lv2 := Level.new()
 	add_child(lv2)
@@ -1002,15 +1002,15 @@ func _test_difficulty() -> void:
 			break
 		await get_tree().process_frame
 	Engine.time_scale = 1.0
-	_ck(b2._st == "fight", "困难：老祖入场到位（进入 fight）")
-	_ck(b2.max_hp == 3600, "困难：老祖血量 3600")
-	_ck(b2.phase_marks().size() == 2, "困难：三重法相（两条阶段刻度）")
+	_ck(b2._st == "fight", "困难：始祖入场到位（进入 fight）")
+	_ck(b2.max_hp == 3600, "困难：始祖血量 3600")
+	_ck(b2.phase_marks().size() == 2, "困难：三重阶段（两条阶段刻度）")
 
 	# 异色 / 同色的伤害差（同步连打，不让 _ward 有机会改颜色）
 	b2.ward = Game.RED
 	var h0 := b2.hp
 	b2.hit(100, Game.BLUE)
-	_ck(h0 - b2.hp == 60, "困难：法罩下异色伤害衰减到 60%")
+	_ck(h0 - b2.hp == 60, "困难：护罩下异色伤害衰减到 60%")
 	b2.ward = Game.RED
 	var h1 := b2.hp
 	b2.hit(100, Game.RED)
@@ -1023,7 +1023,7 @@ func _test_difficulty() -> void:
 		if b2.enraged:
 			break
 		await get_tree().process_frame
-	_ck(b2.enraged, "困难：血量跌破三成 -> 老祖狂暴")
+	_ck(b2.enraged, "困难：血量跌破三成 -> 始祖狂暴")
 
 	# 只留狂暴螺旋：把常规套路的计时器顶到很远，避免其它弹幕混进来
 	b2._cast = 9999.0
@@ -1062,7 +1062,7 @@ func _test_score_persist() -> void:
 	_ck(absf(Game.score_multiplier() - 1.35) < 0.001, "困难：计分倍率 1.35")
 
 	# ---- 关卡实际落账：走的是 _add_score，与 HUD / 结算同源 ----
-	Game.picked_robes = [Game.RED, Game.WHITE]
+	Game.picked_armors = [Game.RED, Game.WHITE]
 	var lv := Level.new()
 	add_child(lv)
 	lv._running = false
@@ -1078,17 +1078,17 @@ func _test_score_persist() -> void:
 	await _frames(3)
 
 	# ---- 品阶阈值（针对加权后的分数）----
-	_ck(Game.rank_of(5999) == "黄品 · 炼气", "品阶：5999 -> 黄品 · 炼气")
-	_ck(Game.rank_of(6000) == "玄品 · 筑基", "品阶：6000 -> 玄品 · 筑基")
-	_ck(Game.rank_of(9000) == "地品 · 金丹", "品阶：9000 -> 地品 · 金丹")
-	_ck(Game.rank_of(12500) == "天品 · 元婴", "品阶：12500 -> 天品 · 元婴")
+	_ck(Game.rank_of(5999) == "铁勋 · 星兵", "品阶：5999 -> 铁勋 · 星兵")
+	_ck(Game.rank_of(6000) == "铜勋 · 星尉", "品阶：6000 -> 铜勋 · 星尉")
+	_ck(Game.rank_of(9000) == "银勋 · 星将", "品阶：9000 -> 银勋 · 星将")
+	_ck(Game.rank_of(12500) == "金勋 · 星帅", "品阶：12500 -> 金勋 · 星帅")
 	Game.difficulty = Game.HARD
 	var hard_max := int(roundf(9800.0 * Game.score_multiplier()))
 	_ck(hard_max >= 12500, "顶档可及：困难满分 9800 × 1.35 = %d ≥ 12500" % hard_max)
 	Game.difficulty = Game.NORMAL
 	var norm_max := int(roundf(9800.0 * Game.score_multiplier()))
 	_ck(norm_max < 12500 and norm_max >= 9000,
-		"普通满分 9800 × 1.15 = %d -> 止步地品" % norm_max)
+		"普通满分 9800 × 1.15 = %d -> 止步银勋" % norm_max)
 
 	# ---- 最高分持久化 ----
 	Game.highscores = {}
@@ -1165,7 +1165,7 @@ func _test_score_persist() -> void:
 func _test_death() -> void:
 	print("------ death ------")
 	Game.difficulty = Game.NORMAL
-	Game.picked_robes = [Game.RED, Game.WHITE]
+	Game.picked_armors = [Game.RED, Game.WHITE]
 	var lv := Level.new()
 	add_child(lv)
 	await _frames(3)
@@ -1182,23 +1182,23 @@ func _test_death() -> void:
 		Engine.time_scale = 1.0
 		lv.queue_free()
 		return
-	# 必须等老祖真的进入 fight 再判「收手」，否则入场阶段 _st 本来就不是 fight，
+	# 必须等始祖真的进入 fight 再判「收手」，否则入场阶段 _st 本来就不是 fight，
 	# 断言会白给（这也是一开始差点漏掉的点）
 	for _i in 400:
 		if b._st == "fight":
 			break
 		await get_tree().process_frame
 	Engine.time_scale = 1.0
-	_ck(b._st == "fight", "老祖入场到位，正在开火")
+	_ck(b._st == "fight", "始祖入场到位，正在开火")
 	if is_instance_valid(p):
 		p.hp = 1
 		p._invuln = 0.0
-		p.take_hit(Game.BLUE, 99)      # 身上是赤炎袍，吃蓝弹 -> 直接陨落
+		p.take_hit(Game.BLUE, 99)      # 身上是电浆袍，吃蓝弹 -> 直接陨落
 	await _frames(3)
 	_ck(not is_instance_valid(p) or not p.alive, "玩家被打死")
-	_ck(b._st != "fight", "玩家陨落 -> 老祖收手（不再按套路开火）")
-	_ck(b._live_player() == null, "老祖不再持有已释放的玩家引用")
-	# 让老祖持有一个「已释放」的玩家引用再开火 —— 这是原报错的精确复现条件。
+	_ck(b._st != "fight", "玩家陨落 -> 始祖收手（不再按套路开火）")
+	_ck(b._live_player() == null, "始祖不再持有已释放的玩家引用")
+	# 让始祖持有一个「已释放」的玩家引用再开火 —— 这是原报错的精确复现条件。
 	# 只要 _b() 里直接写 `b.target = player_ref`，这一炮就会炸。
 	var dummy := Player.new()
 	dummy.alive = false            # 不让它跑逻辑，只当个会被 free 的靶子
@@ -1221,7 +1221,7 @@ func _test_death() -> void:
 	Engine.time_scale = 4.0
 	await _frames(200)
 	Engine.time_scale = 1.0
-	_ck(b._st != "fight", "陨落后持续跑帧 -> 老祖始终未再开火")
+	_ck(b._st != "fight", "陨落后持续跑帧 -> 始祖始终未再开火")
 	lv.queue_free()
 	await _frames(3)
 
@@ -1232,7 +1232,7 @@ func _test_win() -> void:
 	print("------ win ------")
 	Engine.time_scale = 8.0
 	Game.difficulty = Game.NORMAL
-	Game.picked_robes = [Game.WHITE, Game.RED]
+	Game.picked_armors = [Game.WHITE, Game.RED]
 	var lv := Level.new()
 	_finished = false
 	lv.finished.connect(func(w: bool) -> void:

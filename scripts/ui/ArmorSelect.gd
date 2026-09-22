@@ -1,6 +1,6 @@
-class_name RobeSelect
+class_name ArmorSelect
 extends Node2D
-## 择道袍：四选二（关卡内按空格互换）
+## 择战甲：四选二（关卡内按空格互换）
 
 signal start_pressed()
 signal back_pressed()
@@ -16,7 +16,7 @@ var _t := 0.0
 
 
 func _ready() -> void:
-	# 卡面立绘是像素 sprite 按 3 倍放大，必须最近邻采样，否则会糊
+	# 立绘缩放为连续小数倍（1.05），这里保持默认线性采样即可
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	var bg := Background.new()
 	bg.scroll_speed = 26.0
@@ -51,10 +51,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			return
 	if event.is_action_pressed("confirm"):
 		if picked.size() == 2:
-			Game.picked_robes = picked.duplicate()
+			Game.picked_armors = picked.duplicate()
 			start_pressed.emit()
 		else:
-			Fx.pop(self, Vector2(Game.VIEW_W * 0.5, 620.0), "还需再择一件道袍",
+			Fx.pop(self, Vector2(Game.VIEW_W * 0.5, 620.0), "还需再择一件战甲",
 				Color(1.0, 0.6, 0.5), 20, 1.0)
 		get_viewport().set_input_as_handled()
 		return
@@ -87,9 +87,9 @@ func _draw() -> void:
 	var H := Game.VIEW_H
 	draw_rect(Rect2(0.0, 0.0, W, H), Color(0.02, 0.02, 0.06, 0.42))
 
-	DrawUtil.txt(self, "择 二 道 袍", Vector2(W * 0.5, 104.0), 46,
+	DrawUtil.txt(self, "择 二 战 甲", Vector2(W * 0.5, 104.0), 46,
 		Color(1.0, 0.94, 0.76), HORIZONTAL_ALIGNMENT_CENTER)
-	DrawUtil.txt(self, "关卡中按【空格】在两件道袍间互换 —— 免疫同色弹幕",
+	DrawUtil.txt(self, "关卡中按【空格】在两件战甲间互换 —— 免疫同色弹幕",
 		Vector2(W * 0.5, 146.0), 18, Color(0.86, 0.90, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 
 	for i in CARD_N:
@@ -113,20 +113,20 @@ func _draw() -> void:
 		# 顶部色带
 		draw_rect(Rect2(rr.position.x, rr.position.y, rr.size.x, 10.0), m)
 
-		# 道袍立绘
+		# 战甲立绘
 		var cp := Vector2(rr.position.x + rr.size.x * 0.5, rr.position.y + 92.0)
 		var pulse := 0.5 + 0.5 * sin(_t * 2.4 + i)
 		draw_circle(cp, 58.0 + 5.0 * pulse, Color(m.r, m.g, m.b, 0.08))
-		RobeArt.draw(self, cp, i, _t, 3.0)
+		ArmorArt.draw(self, cp, i, _t, 1.05)
 
 		# 文案
-		DrawUtil.txt(self, Game.ROBE_TITLE[i], Vector2(cp.x, rr.position.y + 176.0), 26,
+		DrawUtil.txt(self, Game.ARMOR_TITLE[i], Vector2(cp.x, rr.position.y + 176.0), 26,
 			Color(1.0, 1.0, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 		DrawUtil.txt(self, "免疫【%s】弹" % Game.COLOR_CN[i],
 			Vector2(cp.x, rr.position.y + 208.0), 17,
 			Color(m.r, m.g, m.b), HORIZONTAL_ALIGNMENT_CENTER)
 
-		var lines: PackedStringArray = str(Game.ROBE_DESC[i]).split("\n")
+		var lines: PackedStringArray = str(Game.ARMOR_DESC[i]).split("\n")
 		for j in lines.size():
 			DrawUtil.txt(self, str(lines[j]), Vector2(cp.x, rr.position.y + 248.0 + j * 27.0),
 				15, Color(0.84, 0.88, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
@@ -145,14 +145,14 @@ func _draw() -> void:
 	# 底部状态
 	var names := PackedStringArray()
 	for c in picked:
-		names.append(Game.ROBE_TITLE[c])
+		names.append(Game.ARMOR_TITLE[c])
 	var s := "已择：" + (" + ".join(names) if names.size() > 0 else "（尚未选择）")
 	DrawUtil.txt(self, s, Vector2(W * 0.5, 636.0), 22, Color(1.0, 0.92, 0.66),
 		HORIZONTAL_ALIGNMENT_CENTER)
 
 	var a := 0.55 + 0.45 * (0.5 + 0.5 * sin(_t * 3.4))
-	var tip := "按 Enter 开始问道（需择满两件）" if picked.size() == 2 \
-		else "再择 %d 件道袍" % (2 - picked.size())
+	var tip := "按 Enter 开始出征（需择满两件）" if picked.size() == 2 \
+		else "再择 %d 件战甲" % (2 - picked.size())
 	DrawUtil.txt(self, tip, Vector2(W * 0.5, 676.0), 22,
 		Color(1.0, 0.95, 0.72, a), HORIZONTAL_ALIGNMENT_CENTER)
 	DrawUtil.txt(self, "ESC 返回开始界面", Vector2(W * 0.5, 704.0), 15,

@@ -1,27 +1,27 @@
 class_name Level
 extends Node2D
-## 关卡流程：三波妖潮 -> 血魔老祖
-## 第 2 / 第 3 重妖潮以【护法妖将】压轴（Elite.gd，属性法罡逼玩家临阵换袍）
-## 道具两个来源：斩妖按概率掉落（DROP_CHANCE）+ 每波结束刷新 WAVE_DROP 个
-##   斩妖将另有保底一件（_on_elite_killed）
-## 波次结束**不再回血** —— 元神只靠回春丹补
+## 关卡流程：三波星袭 -> 星盗始祖
+## 第 2 / 第 3 波以【星盗战将】压轴（Elite.gd，属性力场逼玩家临阵换甲）
+## 道具两个来源：斩敌按概率掉落（DROP_CHANCE）+ 每波结束刷新 WAVE_DROP 个
+##   斩战将另有保底一件（_on_elite_killed）
+## 波次结束**不再回血** —— 生命只靠修复包补
 
 ## 关卡结束（胜 / 负）—— 由 Main 连接，Level 不反向找 Main
 signal finished(win: bool)
 ## 玩家请求重来本关（转发自 HUD）
 signal restart_requested()
 
-## 击杀小妖的掉落概率（实测：2000 次击杀掉落 373 次 = 18.65%，与配置一致）
+## 击杀星盗的掉落概率（实测：2000 次击杀掉落 373 次 = 18.65%，与配置一致）
 const DROP_CHANCE := 0.18
-## 每波妖潮结束后额外刷新的道具数（每局固定 3 个）
+## 每波星袭结束后额外刷新的道具数（每局固定 3 个）
 const WAVE_DROP := 1
 
 ## 单色连长上限：允许 2 连，禁止连续 ≥3 同色。
-## （第 1 重是刻意的一色到底 —— 教换袍的教学重，不受此限。）
+## （第 1 波是刻意的一色到底 —— 教换甲的教学波，不受此限。）
 const MAX_RUN := 2
 
-## 每重「目标色」的只数（∈ 玩家道袍色，负责换袍增伤）。
-## 三重的只数 = 5 / (5+2) / (5+3) = 20 —— 这个 20 是 P0-1 满分（9800）的基数，
+## 每波「目标色」的只数（∈ 玩家战甲色，负责换甲增伤）。
+## 三波的只数 = 5 / (5+2) / (5+3) = 20 —— 这个 20 是 P0-1 满分（9800）的基数，
 ## 动配额之前必须先把计分重算一遍。
 const WAVE_TARGETS := 5
 
@@ -30,11 +30,11 @@ var boss: Boss = null
 var hud: HUD = null
 var bg: Background = null
 var score: int = 0
-var wave_text: String = "入 境"
+var wave_text: String = "出 击"
 var paused: bool = false
 var _running: bool = false
-## 本局两重的「骚扰色」（∈ S'，玩家永远免疫不了，只负责走位承压）。
-## [0] 给第 2 重、[1] 给第 3 重，两重必定不同色 —— 第 3 重才凑齐四色。
+## 本局两波的「骚扰色」（∈ S'，玩家永远免疫不了，只负责走位承压）。
+## [0] 给第 2 波、[1] 给第 3 波，两波必定不同色 —— 第 3 波才凑齐四色。
 var _harass: Array[int] = []
 
 
@@ -44,12 +44,12 @@ func _ready() -> void:
 
 	player = Player.new()
 	player.world = self
-	player.robes = []
-	for c in Game.picked_robes:
-		player.robes.append(int(c))
+	player.armors = []
+	for c in Game.picked_armors:
+		player.armors.append(int(c))
 	add_child(player)
 	player.player_died.connect(_on_player_died)
-	_plan_harass()          # 敌色依赖道袍，得等 robes 定下来才能排
+	_plan_harass()          # 敌色依赖战甲，得等 armors 定下来才能排
 
 	hud = HUD.new()
 	hud.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -75,13 +75,13 @@ func wait(t: float) -> void:
 ## 重标定前合计 15.3 秒，节奏被切成四段碎觉；现在压到 7.6 秒：
 ##   2.1 + 1.7 + 1.7 + 2.1 = 7.6
 ## 横幅时长都留得比 wait 长一点 —— 让尾巴 0.3 秒压在下一波开头，
-## 字还在淡出时妖已经进场，衔接不断档。
+## 字还在淡出时敌已经进场，衔接不断档。
 func _run() -> void:
-	# 第 1 重点名：直接报出本重主色与对应的那件道袍，把「换袍」教在第一次遭遇上。
-	#（原来这行是操作提示 —— 那部分游戏说明里已有，横幅让给更关键的换袍教学。）
-	var t1: int = player.robes[1] if player.robes.size() > 1 else Game.WHITE
-	hud.show_banner("第 一 重 · %s 妖潮" % Game.COLOR_CN[t1],
-		"换上【%s】—— 免疫同色弹幕，飞剑伤害 +50%%" % Game.ROBE_TITLE[t1], 1.2)
+	# 第 1 波点名：直接报出本波主色与对应的那件战甲，把「换甲」教在第一次遭遇上。
+	#（原来这行是操作提示 —— 那部分游戏说明里已有，横幅让给更关键的换甲教学。）
+	var t1: int = player.armors[1] if player.armors.size() > 1 else Game.WHITE
+	hud.show_banner("第 一 波 · %s 星袭" % Game.COLOR_CN[t1],
+		"换上【%s】—— 免疫同色弹幕，光刃伤害 +50%%" % Game.ARMOR_TITLE[t1], 1.2)
 	await wait(0.9)
 	if not _running:
 		return
@@ -90,7 +90,7 @@ func _run() -> void:
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("第 二 重 · 双色交替", "同色飞剑伤害 + 50% · 异色妖只能硬躲", 1.0)
+	hud.show_banner("第 二 波 · 双色交替", "同色光刃伤害 + 50% · 异色敌只能硬躲", 1.0)
 	await wait(0.7)
 	if not _running:
 		return
@@ -99,7 +99,7 @@ func _run() -> void:
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("第 三 重 · 妖王先锋", "老祖将至 · 四色齐至", 1.0)
+	hud.show_banner("第 三 波 · 先锋", "始祖将至 · 四色齐至", 1.0)
 	await wait(0.7)
 	if not _running:
 		return
@@ -108,7 +108,7 @@ func _run() -> void:
 	if not _running:
 		return
 	_drop_wave()
-	hud.show_banner("血魔老祖 · 现世", "法罩开启时 —— 唯有同色飞剑可破，随时更换道袍", 1.2)
+	hud.show_banner("星盗始祖 · 现身", "护罩开启时 —— 唯有同色光刃可破，随时更换战甲", 1.2)
 	await wait(0.9)
 	if not _running:
 		return
@@ -142,46 +142,46 @@ func _on_restart_requested() -> void:
 	restart_requested.emit()
 
 
-# ---------------------------------------------------------------- 妖潮配色
-# 敌色不再逐只 randi()%4，而是随玩家两件道袍 S 对称生成：
-#   目标色 ∈ S   —— 逼换袍（同色飞剑 +50%，且被道袍吸收）
+# ---------------------------------------------------------------- 星袭配色
+# 敌色不再逐只 randi()%4，而是随玩家两件战甲 S 对称生成：
+#   目标色 ∈ S   —— 逼换甲（同色光刃 +50%，且被战甲吸收）
 #   骚扰色 ∈ S'  —— 逼走位（玩家永远免疫不了，远驻 hover 放弹）
-# 独立随机会产出「连续 4 只同色」，玩家全程不用换袍，换袍这根支柱就漂没了；
+# 独立随机会产出「连续 4 只同色」，玩家全程不用换甲，换甲这根支柱就漂没了；
 # 所以走「配额 + 约束洗牌」，先把整波色序排好再按序放怪。
 # ----------------------------------------------------------------
 
-## S' = 四色里玩家没选的那些色（robes 恒为 2 个不同色，故恒为 2 个）
-static func _complement(robes: Array[int]) -> Array[int]:
+## S' = 四色里玩家没选的那些色（armors 恒为 2 个不同色，故恒为 2 个）
+static func _complement(armors: Array[int]) -> Array[int]:
 	var out: Array[int] = []
 	for c in Game.COLOR_CN.size():
-		if not robes.has(c):
+		if not armors.has(c):
 			out.append(c)
 	return out
 
 
-## 本局两重的骚扰色：S' 洗牌后 [0] 给第 2 重、[1] 给第 3 重（跨局有变化）
+## 本局两波的骚扰色：S' 洗牌后 [0] 给第 2 波、[1] 给第 3 波（跨局有变化）
 func _plan_harass() -> void:
-	var comp := _complement(player.robes)
+	var comp := _complement(player.armors)
 	if comp.size() < 2:
 		comp = [Game.RED, Game.WHITE, Game.BLUE, Game.YELLOW]
 	comp.shuffle()
 	_harass = comp
 
 
-## 第 n 重的出怪色序（长度即本重只数）
-## [param robes] 玩家两件道袍色 S  [param h2] 第 2 重骚扰色  [param h3] 第 3 重骚扰色
-static func _wave_colors(n: int, robes: Array[int], h2: int, h3: int) -> Array[int]:
-	var a: int = robes[1] if robes.size() > 1 else Game.RED     # 主色（第 1 重整重都是它）
-	var b: int = robes[0] if robes.size() > 0 else Game.WHITE   # 副色
+## 第 n 波的出怪色序（长度即本波只数）
+## [param armors] 玩家两件战甲色 S  [param h2] 第 2 波骚扰色  [param h3] 第 3 波骚扰色
+static func _wave_colors(n: int, armors: Array[int], h2: int, h3: int) -> Array[int]:
+	var a: int = armors[1] if armors.size() > 1 else Game.RED     # 主色（第 1 波整波都是它）
+	var b: int = armors[0] if armors.size() > 0 else Game.WHITE   # 副色
 	var seq: Array[int] = []
 	seq.resize(WAVE_TARGETS)
 	seq.fill(a)
 	if n <= 1:
-		return seq                    # 第 1 重：5 只全为主色，一色到底，教换袍
+		return seq                    # 第 1 波：5 只全为主色，一色到底，教换甲
 	if n == 2:
-		seq = [a, b, a, b, a]        # 第 2 重：目标色严格交替（两色必换 4 次袍）
+		seq = [a, b, a, b, a]        # 第 2 波：目标色严格交替（两色必换 4 次甲）
 		return _insert_harass(seq, h2, _harass_count(2))
-	# 第 3 重：目标色在两色间摆动，允许 2 连、禁止连续 ≥3 同色 —— 得自己判断何时换
+	# 第 3 波：目标色在两色间摆动，允许 2 连、禁止连续 ≥3 同色 —— 得自己判断何时换
 	var na := 3 if randf() < 0.5 else 2
 	seq = _alt_fill(a, b, na, WAVE_TARGETS - na, MAX_RUN)
 	return _insert_harass(seq, h3, _harass_count(3))
@@ -292,9 +292,9 @@ static func _insert_harass(seq: Array[int], h: int, count: int) -> Array[int]:
 	return seq
 
 
-## [param elite] 本波是否以【护法妖将】压轴（第 2 / 第 3 重各一只）
+## [param elite] 本波是否以【星盗战将】压轴（第 2 / 第 3 波各一只）
 func _wave(n: int, scale: float, elite := false) -> void:
-	_set_wave("第 %d 重 · 妖潮" % n)
+	_set_wave("第 %d 波 · 星袭" % n)
 	if _harass.size() < 2:
 		_plan_harass()
 	var harass := -1
@@ -302,7 +302,7 @@ func _wave(n: int, scale: float, elite := false) -> void:
 		harass = _harass[0]
 	elif n >= 3:
 		harass = _harass[1]
-	var seq := _wave_colors(n, player.robes, _harass[0], _harass[1])
+	var seq := _wave_colors(n, player.armors, _harass[0], _harass[1])
 	var pats := _wave_moves(n)
 	var gap := _wave_gap(n)
 	for c in seq:
@@ -315,8 +315,8 @@ func _wave(n: int, scale: float, elite := false) -> void:
 		if not _running:
 			return
 		_spawn_elite(scale)
-	# 等待清场。精英是硬性门槛 —— 小妖可以剩最后一只不等，妖将没斩就别想进下一重。
-	# 上限放宽到 26 秒：斩一只妖将约 8~12 秒，14 秒的窗口会把它卡在半路。
+	# 等待清场。精英是硬性门槛 —— 星盗可以剩最后一只不等，战将没斩就别想进下一波。
+	# 上限放宽到 26 秒：斩一只战将约 8~12 秒，14 秒的窗口会把它卡在半路。
 	var limit := 26.0 if elite else 14.0
 	var guard := 0.0
 	while _running and guard < limit:
@@ -327,9 +327,9 @@ func _wave(n: int, scale: float, elite := false) -> void:
 
 
 ## [param c] 出怪色（由 _wave_colors 排定）
-## [param harass] 本重骚扰色；c == harass 时强制 hover（远驻放弹、不追击），
-##                harass < 0 表示本重没有骚扰色（第 1 重）
-## [param pats] 本重目标色的运动模式池（骚扰色不走这里）
+## [param harass] 本波骚扰色；c == harass 时强制 hover（远驻放弹、不追击），
+##                harass < 0 表示本波没有骚扰色（第 1 波）
+## [param pats] 本波目标色的运动模式池（骚扰色不走这里）
 func _spawn_enemy(scale: float, c: int, harass: int, pats: Array[String]) -> void:
 	var pat := "hover"
 	if c != harass:
@@ -343,7 +343,7 @@ func _spawn_enemy(scale: float, c: int, harass: int, pats: Array[String]) -> voi
 	e.killed.connect(_on_enemy_killed)
 
 
-## 场上还有几只需要清掉的小妖（妖将另算，见 _elite_alive）。
+## 场上还有几只需要清掉的星盗（战将另算，见 _elite_alive）。
 func _enemy_count() -> int:
 	var n := 0
 	for ch in get_children():
@@ -352,7 +352,7 @@ func _enemy_count() -> int:
 	return n
 
 
-## 场上是否还有活着的护法妖将（清场判定用）
+## 场上是否还有活着的星盗战将（清场判定用）
 func _elite_alive() -> bool:
 	for ch in get_children():
 		if ch is Elite and not (ch as Elite).dead:
@@ -360,20 +360,20 @@ func _elite_alive() -> bool:
 	return false
 
 
-## 压轴：护法妖将。法罡色由 Elite 自己从玩家道袍里抽 —— 保证一定破得了
+## 压轴：星盗战将。力场色由 Elite 自己从玩家战甲里抽 —— 保证一定破得了
 func _spawn_elite(scale: float) -> void:
 	var e := Elite.new()
 	e.world = self
 	add_child(e)
 	e.player_ref = player
-	e.player_robes = player.robes
+	e.player_armors = player.armors
 	e.setup(scale, randf() * (Game.VIEW_H - 300.0) + 150.0)
 	e.killed.connect(_on_elite_killed)
-	hud.show_banner("护 法 妖 将",
-		"身披【%s】法罡 —— 换上同色道袍方可速破" % Game.COLOR_CN[e.color], 2.2)
+	hud.show_banner("星 盗 战 将",
+		"身披【%s】力场 —— 换上同色战甲方能速破" % Game.COLOR_CN[e.color], 2.2)
 
 
-## 斩妖将：厚赏 + 必掉一件道具（斩它是有代价的，不能让人空手）
+## 斩战将：厚赏 + 必掉一件道具（斩它是有代价的，不能让人空手）
 func _on_elite_killed(pos: Vector2, c: int, sc: int) -> void:
 	_add_score(sc)
 	Fx.pop(self, pos, "+%d" % sc, Game.COLOR_MAIN[c], 24, 1.1)
@@ -387,7 +387,7 @@ func _on_enemy_killed(pos: Vector2, c: int, sc: int) -> void:
 		Pickup.spawn(self, Pickup.random_kind(), pos)
 
 
-## 每波妖潮结束：额外刷新 WAVE_DROP 个道具，散落在场景右段，逼玩家挪过去捡
+## 每波星袭结束：额外刷新 WAVE_DROP 个道具，散落在场景右段，逼玩家挪过去捡
 func _drop_wave() -> void:
 	for i in WAVE_DROP:
 		var x := randf() * 540.0 + 460.0
@@ -397,56 +397,56 @@ func _drop_wave() -> void:
 
 # ---------------------------------------------------------------- Boss
 func _boss_fight() -> void:
-	_set_wave("血魔老祖")
+	_set_wave("星盗始祖")
 	bg.scroll_speed = 22.0
 	boss = Boss.new()
 	boss.world = self
 	add_child(boss)
 	boss.player_ref = player
-	boss.player_robes = player.robes
+	boss.player_armors = player.armors
 	boss.phase_chg.connect(_on_boss_phase)
 	boss.ward_chg.connect(_on_ward)
 	boss.enrage_started.connect(_on_enrage)
 	boss.boss_died.connect(_on_boss_died)
 	hud.bind_boss(boss)
-	var sub := "四色弹幕 + 属性法罩，破罩方能致胜" if Game.boss_ward() \
-		else "四色弹幕 · 老祖不展法罩，全力输出即可"
-	hud.show_banner("血 魔 老 祖", sub, 2.4)
+	var sub := "四色弹幕 + 属性护罩，破罩方能致胜" if Game.boss_ward() \
+		else "四色弹幕 · 始祖不展护罩，全力输出即可"
+	hud.show_banner("星 盗 始 祖", sub, 2.4)
 
 
 func _on_enrage() -> void:
-	hud.show_banner("狂 暴", "老祖周身泛起血光 · 四色螺旋弹幕", 1.8)
+	hud.show_banner("狂 暴", "始祖周身泛起血光 · 四色螺旋弹幕", 1.8)
 
 
 func _on_boss_phase(p: int) -> void:
 	_add_score(600)
-	hud.show_banner("第 %d 重法相" % p, "血魔变换法相，弹幕更急", 1.6)
+	hud.show_banner("第 %d 阶段" % p, "始祖切换阶段，弹幕更急", 1.6)
 
 
 func _on_ward(c: int) -> void:
 	if c < 0 or player == null or not is_instance_valid(player):
 		return
 	if player.color != c:
-		Fx.pop(self, player.position + Vector2(0.0, -52.0), "法罩 · %s" % Game.COLOR_CN[c],
+		Fx.pop(self, player.position + Vector2(0.0, -52.0), "护罩 · %s" % Game.COLOR_CN[c],
 			Game.COLOR_MAIN[c], 20, 1.1)
 
 
 func _on_boss_died() -> void:
 	_add_score(5000)
-	_set_wave("功 成")
+	_set_wave("凯 旋")
 	await wait(1.3)
 	_finish(true)
 
 
 func _on_player_died() -> void:
 	_running = false
-	_set_wave("陨 落")
+	_set_wave("阵 亡")
 	_stop_field()
 	await wait(1.5)
 	_finish(false)
 
 
-## 玩家已陨落：清弹、撤妖、让老祖收手。
+## 玩家已陨落：清弹、撤敌、让始祖收手。
 ## 不做这步的话，接下来这 1.5 秒里 Boss 仍会按套路开火，而 player_ref 指向的
 ## 玩家节点已经被 queue_free —— 把「已释放对象」赋给弹幕的 target 会直接报
 ## "Invalid assignment ... with value of type 'previously freed'"。
@@ -477,7 +477,7 @@ func _finish(win: bool) -> void:
 	Game.result_prev_high = Game.highscore_for(Game.difficulty)
 	Game.result_is_new_high = score > Game.result_prev_high
 	if Game.result_is_new_high:
-		Game.save_highscore(Game.difficulty, score, Game.picked_robes,
+		Game.save_highscore(Game.difficulty, score, Game.picked_armors,
 			Game.rank_of(score), win)
 	finished.emit(win)
 

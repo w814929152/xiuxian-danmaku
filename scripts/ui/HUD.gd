@@ -1,6 +1,6 @@
 class_name HUD
 extends Node2D
-## 战斗界面：血条 / 罡气 / 双道袍槽 / Boss 血条与法罩提示 / 老祖狂暴的血色屏幕
+## 战斗界面：血条 / 护盾 / 双战甲槽 / Boss 血条与护罩提示 / 始祖狂暴的血色屏幕
 
 ## 玩家按下暂停键：HUD 只上报，由 Level 决定是否真正暂停
 signal pause_toggled(paused: bool)
@@ -29,7 +29,7 @@ const RAGE_COL := Color(1.0, 0.12, 0.09)
 var player: Player = null
 var boss: Boss = null
 var score: int = 0
-var wave_text: String = "入 境"
+var wave_text: String = "出 击"
 var paused := false
 var banner := ""
 var banner_sub := ""
@@ -101,7 +101,7 @@ func _rage_edge() -> void:
 	_was_enraged = on
 
 
-## 老祖狂暴 —— 屏幕四周泛起血色。三条节奏叠在一起：
+## 始祖狂暴 —— 屏幕四周泛起血色。三条节奏叠在一起：
 ##   1. **呼吸**（RAGE_BREATH）：缓慢起伏，让血光「活着」而不是一层死贴纸；
 ##   2. **心跳**（RAGE_BEAT）：每 RAGE_BEAT_T 秒一次尖峰衰减，这才是「闪」；
 ##   3. **强闪**（_rage_flash）：刚跌破三成那一下的爆闪 ——
@@ -162,7 +162,7 @@ func _buff_row(p: Player) -> void:
 		cols.append(ca)
 	if p.invincible:
 		var ci: Color = Pickup.COL[Pickup.T.INVINC]
-		chips.append("无量 %.1fs" % p.invinc)
+		chips.append("力场 %.1fs" % p.invinc)
 		cols.append(ci)
 	var cx := 26.0
 	for i in chips.size():
@@ -185,46 +185,46 @@ func _draw() -> void:
 		if hp_r < 0.3:
 			hpc = Color(1.0, 0.18, 0.22)
 		_bar(26.0, 24.0, 320.0, 20.0, hp_r, hpc)
-		DrawUtil.txt(self, "元神 %d / %d" % [p.hp, Player.MAX_HP],
+		DrawUtil.txt(self, "生命 %d / %d" % [p.hp, Player.MAX_HP],
 			Vector2(36.0, 40.0), 15, Color(0.94, 0.95, 1.0))
 
-		# 罡气护盾
+		# 护盾
 		var sk := float(p.shield) / float(Player.SHIELD_MAX)
 		var skc := Color(0.93, 0.96, 1.0, 0.95) if p.color == Game.WHITE \
 			else Color(0.55, 0.60, 0.72, 0.38)
 		_bar(26.0, 52.0, 320.0, 12.0, sk, skc)
-		DrawUtil.txt(self, "罡气 %d" % p.shield, Vector2(354.0, 63.0), 14,
+		DrawUtil.txt(self, "护盾 %d" % p.shield, Vector2(354.0, 63.0), 14,
 			Color(0.80, 0.86, 1.0) if p.color == Game.WHITE else Color(0.5, 0.55, 0.66))
 		if p.color != Game.WHITE:
-			DrawUtil.txt(self, "（仅太清罡气状态下生效）", Vector2(408.0, 63.0), 13,
+			DrawUtil.txt(self, "（仅光子护盾状态下生效）", Vector2(408.0, 63.0), 13,
 				Color(0.48, 0.52, 0.62))
 
 		# 无伤读条
 		if p.shield < Player.SHIELD_MAX:
 			var rt := clampf(p.no_hit_ratio(), 0.0, 1.0)
 			_bar(26.0, 70.0, 320.0, 5.0, rt, Color(0.5, 0.85, 1.0, 0.75))
-			DrawUtil.txt(self, "十息回气 %.0f%%" % (rt * 100.0), Vector2(354.0, 78.0), 12,
+			DrawUtil.txt(self, "十息回盾 %.0f%%" % (rt * 100.0), Vector2(354.0, 78.0), 12,
 				Color(0.55, 0.8, 0.95))
 
-		# 符光过热（戊土符袍专属：满值即停手散热）
+		# 引力束过热（引力束甲专属：满值即停手散热）
 		if p.color == Game.YELLOW or p.heat > 0.0:
 			var hr := clampf(p.heat / Player.HEAT_MAX, 0.0, 1.0)
 			var hc := Color(1.0, 0.35, 0.20) if p.overheated \
 				else Color(1.0, 0.80, 0.22)
 			_bar(26.0, 84.0, 320.0, 10.0, hr, hc)
-			var hs: String = "符袍过热 · 停手散热" if p.overheated \
-				else "符光过热 %d%%" % int(hr * 100.0)
+			var hs: String = "束甲过热 · 停手散热" if p.overheated \
+				else "引力束过热 %d%%" % int(hr * 100.0)
 			DrawUtil.txt(self, hs, Vector2(354.0, 94.0), 13, hc)
 
-		# 道具增益（回春丹是即时效果，不占常驻槽位）
+		# 道具增益（修复包是即时效果，不占常驻槽位）
 		_buff_row(p)
 
-		# 双道袍槽
+		# 双战甲槽
 		var bx := 26.0
 		var by := Game.VIEW_H - 96.0
-		for i in p.robes.size():
-			var c: int = p.robes[i]
-			var act: bool = (i == p.robe_idx)
+		for i in p.armors.size():
+			var c: int = p.armors[i]
+			var act: bool = (i == p.armor_idx)
 			var w: float = 132.0 if act else 112.0
 			var h: float = 58.0 if act else 48.0
 			var ox: float = bx + (i * 146.0)
@@ -237,18 +237,18 @@ func _draw() -> void:
 			draw_rect(Rect2(ox, oy, w, h), Color(m.r, m.g, m.b, 0.95 if act else 0.4),
 				false, 2.0 if act else 1.2)
 			draw_rect(Rect2(ox + 6.0, oy + 8.0, 12.0, h - 16.0), m)
-			DrawUtil.txt(self, Game.ROBE_TITLE[c], Vector2(ox + 26.0, oy + 24.0),
+			DrawUtil.txt(self, Game.ARMOR_TITLE[c], Vector2(ox + 26.0, oy + 24.0),
 				16 if act else 14, Color(1, 1, 1) if act else Color(0.72, 0.75, 0.85))
-			DrawUtil.txt(self, Game.ROBE_TAG[c], Vector2(ox + 26.0, oy + 43.0),
+			DrawUtil.txt(self, Game.ARMOR_TAG[c], Vector2(ox + 26.0, oy + 43.0),
 				13 if act else 12, Color(m.r, m.g, m.b, 1.0 if act else 0.6))
 			if act:
 				DrawUtil.txt(self, "当前", Vector2(ox + w - 8.0, oy + 20.0), 13,
 					Color(1.0, 0.92, 0.55), HORIZONTAL_ALIGNMENT_RIGHT)
-		DrawUtil.txt(self, "【空格】更换道袍  ·  免疫同色弹幕",
+		DrawUtil.txt(self, "【空格】更换战甲  ·  免疫同色弹幕",
 			Vector2(26.0, Game.VIEW_H - 26.0), 14, Color(0.72, 0.78, 0.95))
 
 	# ---------------- 分数 ----------------
-	DrawUtil.txt(self, "灵石  %d" % score, Vector2(Game.VIEW_W - 26.0, 34.0), 20,
+	DrawUtil.txt(self, "星币  %d" % score, Vector2(Game.VIEW_W - 26.0, 34.0), 20,
 		Color(1.0, 0.92, 0.62), HORIZONTAL_ALIGNMENT_RIGHT)
 	DrawUtil.txt(self, wave_text, Vector2(Game.VIEW_W - 26.0, 58.0), 15,
 		Color(0.78, 0.84, 1.0), HORIZONTAL_ALIGNMENT_RIGHT)
@@ -264,19 +264,19 @@ func _draw() -> void:
 		# 阶段分隔（两重一条线，三重两条）
 		for f in boss.phase_marks():
 			draw_rect(Rect2(X + W * f, 24.0, 2.0, 22.0), Color(0.05, 0.05, 0.08, 0.9))
-		var bt := "血魔老祖  ·  第 %d 重法相" % boss.phase
+		var bt := "星盗始祖  ·  第 %d 阶段" % boss.phase
 		if boss.enraged:
 			bt += "  ·  狂 暴"
 		DrawUtil.txt(self, bt, Vector2(Game.VIEW_W * 0.5, 22.0), 16,
 			Color(1.0, 0.62, 0.55) if boss.enraged else Color(1.0, 0.88, 0.88),
 			HORIZONTAL_ALIGNMENT_CENTER)
 
-		# 法罩提示
+		# 护罩提示
 		var wy := 68.0
 		if boss.ward >= 0:
 			var m: Color = Game.COLOR_MAIN[boss.ward]
-			var s := "法罩 · %s  →  换上【%s】破之" % [
-				Game.COLOR_CN[boss.ward], Game.ROBE_TITLE[boss.ward]
+			var s := "护罩 · %s  →  换上【%s】破之" % [
+				Game.COLOR_CN[boss.ward], Game.ARMOR_TITLE[boss.ward]
 			]
 			var w := DrawUtil.tw(s, 17) + 40.0
 			draw_rect(Rect2(Game.VIEW_W * 0.5 - w * 0.5, wy - 16.0, w, 28.0),
@@ -286,11 +286,11 @@ func _draw() -> void:
 			DrawUtil.txt(self, s, Vector2(Game.VIEW_W * 0.5, wy + 4.0), 17,
 				Color(1, 1, 1), HORIZONTAL_ALIGNMENT_CENTER)
 		else:
-			DrawUtil.txt(self, "法罩未启  ·  全力输出",
+			DrawUtil.txt(self, "护罩未启  ·  全力输出",
 				Vector2(Game.VIEW_W * 0.5, wy + 4.0), 15,
 				Color(0.62, 0.68, 0.82), HORIZONTAL_ALIGNMENT_CENTER)
 
-	# ---------------- 老祖狂暴：屏幕四周血光 ----------------
+	# ---------------- 始祖狂暴：屏幕四周血光 ----------------
 	# 画在横幅之下：横幅的文字仍压在血光之上，读得清
 	if boss != null and is_instance_valid(boss) and boss.enraged:
 		_rage_vignette()
@@ -310,7 +310,7 @@ func _draw() -> void:
 	# ---------------- 暂停 ----------------
 	if paused:
 		draw_rect(Rect2(0.0, 0.0, Game.VIEW_W, Game.VIEW_H), Color(0.02, 0.02, 0.05, 0.62))
-		DrawUtil.txt(self, "入 定", Vector2(Game.VIEW_W * 0.5, Game.VIEW_H * 0.45), 46,
+		DrawUtil.txt(self, "暂 停", Vector2(Game.VIEW_W * 0.5, Game.VIEW_H * 0.45), 46,
 			Color(1.0, 0.95, 0.8), HORIZONTAL_ALIGNMENT_CENTER)
 		DrawUtil.txt(self, "P / ESC 继续 · R 重来本关",
 			Vector2(Game.VIEW_W * 0.5, Game.VIEW_H * 0.45 + 44.0), 18,

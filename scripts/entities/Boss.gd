@@ -1,13 +1,13 @@
 class_name Boss
 extends Damageable
-## 关卡 Boss · 血魔老祖
-## 会周期性展开【属性法罩】：只有同色飞剑能造成全额伤害，异色衰减
-## 法罩颜色只会从玩家选定的两件道袍中抽取 —— 逼迫玩家在战斗中换袍
+## 关卡 Boss · 星盗始祖
+## 会周期性展开【属性护罩】：只有同色光刃能造成全额伤害，异色衰减
+## 护罩颜色只会从玩家选定的两件战甲中抽取 —— 逼迫玩家在战斗中换甲
 ##
 ## 三档难度（Game.boss_hp / boss_phases / boss_ward / bullet_scale / off_color_mul）：
-##   简单  血 1400 · 两重法相 · 无法罩 · 弹幕 55% · 异色 100%
-##   普通  血 2500 · 三重法相 · 无法罩 · 弹幕 80% · 异色 100%
-##   困难  血 3600 · 三重法相 · 有法罩 · 弹幕 100% · 异色  60%
+##   简单  血 1400 · 两重阶段 · 无护罩 · 弹幕 55% · 异色 100%
+##   普通  血 2500 · 三重阶段 · 无护罩 · 弹幕 80% · 异色 100%
+##   困难  血 3600 · 三重阶段 · 有护罩 · 弹幕 100% · 异色  60%
 ## 三档都会在血量降到三成时【狂暴】：周身泛红光，四色螺旋弹幕
 
 signal boss_died()
@@ -42,7 +42,7 @@ var hp: int = MAX_HP
 var max_hp: int = MAX_HP
 var phase := 1
 var player_ref: Player = null
-var player_robes: Array[int] = []
+var player_armors: Array[int] = []
 ## 由 Level 显式注入：弹幕与特效的挂载容器
 var world: Node2D = null
 ## 狂暴中：周身泛红光 + 四色螺旋弹幕
@@ -69,7 +69,7 @@ var _sp4_t := 0.0
 var _flash := 0.0
 var _base_y := 360.0
 var _home_x := 985.0
-## 像素 sprite（魔道法相本体；法罩 / 狂暴等动态效果仍在 _draw 里画）
+## 像素 sprite（始祖本体；护罩 / 狂暴等动态效果仍在 _draw 里画）
 var _art: Sprite2D = null
 
 
@@ -105,7 +105,7 @@ func _process(delta: float) -> void:
 				_st = "fight"
 				_next_skill()
 		"idle":
-			# 玩家已陨落：只飘着，不再开火 / 不再展开法罩
+			# 玩家已陨落：只飘着，不再开火 / 不再展开护罩
 			_move(delta)
 		"fight":
 			_move(delta)
@@ -132,10 +132,10 @@ func _move(delta: float) -> void:
 	position.x = _home_x + sin(_t * 0.27 * TAU) * 62.0
 
 
-# ------------------------------------------------------------ 属性法罩
+# ------------------------------------------------------------ 属性护罩
 func _ward(delta: float) -> void:
 	if not _has_ward:
-		return                 # 简单 / 普通：老祖不展法罩
+		return                 # 简单 / 普通：始祖不展护罩
 	_ward_t -= delta
 	if _ward_t > 0.0:
 		return
@@ -143,10 +143,10 @@ func _ward(delta: float) -> void:
 		ward = -1
 		_ward_t = 3.2 + randf() * 1.6
 	else:
-		if player_robes.is_empty():
+		if player_armors.is_empty():
 			_ward_t = 3.0
 			return
-		ward = player_robes[randi() % player_robes.size()]
+		ward = player_armors[randi() % player_armors.size()]
 		_ward_t = 5.2
 		_ward_anim = 0.0
 		Fx.ring(world, position, Game.COLOR_MAIN[ward], 60.0, 150.0, 0.45, 8.0)
@@ -298,7 +298,7 @@ func hit(dmg: int, c: int) -> void:
 		return
 	var mul := 1.0
 	if ward >= 0:
-		# 异色衰减由难度决定：简单 / 普通没有法罩，困难 = 60%
+		# 异色衰减由难度决定：简单 / 普通没有护罩，困难 = 60%
 		mul = 1.0 if c == ward else _off_color
 	var real := maxi(1, int(roundf(float(dmg) * mul)))
 	hp -= real
@@ -306,7 +306,7 @@ func hit(dmg: int, c: int) -> void:
 	hp_ratio.emit(clampf(float(hp) / float(max_hp), 0.0, 1.0))
 	if ward >= 0:
 		if mul >= 1.0:
-			Fx.pop(self, Vector2(0.0, -70.0), "破罩 %d" % real,
+			Fx.pop(self, Vector2(0.0, -70.0), "击穿 %d" % real,
 				Game.COLOR_MAIN[ward], 17)
 		else:
 			Fx.pop(self, Vector2(0.0, -70.0), "抗性 %d" % real,
@@ -403,19 +403,19 @@ func _draw() -> void:
 			var p := Vector2.RIGHT.rotated(ang) * (152.0 + 14.0 * sin(_t * 5.0 + i))
 			draw_circle(p, 4.2, Color(1.0, 0.42, 0.26, 0.7))
 
-	# 属性法罩
+	# 属性护罩
 	if ward >= 0:
 		var a := 0.55 + 0.35 * sin(_ward_anim * 7.0)
 		draw_circle(Vector2.ZERO, 118.0, Color(m.r, m.g, m.b, 0.07))
 		draw_arc(Vector2.ZERO, 118.0, 0.0, TAU, 56, Color(m.r, m.g, m.b, a), 9.0, true)
 		draw_arc(Vector2.ZERO, 106.0, 0.0, TAU, 56, Color(k.r, k.g, k.b, a * 0.55), 3.0, true)
-		# 法罩符文
+		# 护罩符文
 		for i in 8:
 			var ang := _ward_anim * 1.2 + TAU * float(i) / 8.0
 			var p := Vector2.RIGHT.rotated(ang) * 118.0
 			draw_circle(p, 4.5, Color(k.r, k.g, k.b, a))
 
-	# 四色法珠（当前法罩色的珠子放大）
+	# 四色能量珠（当前护罩色的珠子放大）
 	for i in 4:
 		var ang := _t * 0.85 + TAU * float(i) / 4.0
 		var p := Vector2.RIGHT.rotated(ang) * 96.0
@@ -426,7 +426,7 @@ func _draw() -> void:
 		draw_circle(p, rr, cm)
 		draw_circle(p, rr * 0.42, Game.COLOR_CORE[i])
 
-	# 躯干 / 双角 / 法眼：由 _art（魔道法相像素 sprite）呈现
+	# 躯干 / 双角 / 面甲：由 _art（始祖本体像素 sprite）呈现
 
 	# 末阶狂气
 	if phase >= _phases:
