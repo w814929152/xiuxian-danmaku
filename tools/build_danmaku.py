@@ -157,15 +157,15 @@ def audit(img: Image.Image) -> list[str]:
     return lines
 
 
-def dye(gray: Image.Image, rgb: tuple[float, float, float]) -> Image.Image:
-    """白模 × 属性色（模拟 modulate 乘法），返回展平到不透明底的图。"""
+def dye(gray: Image.Image, rgb: tuple[float, float, float],
+        bg: tuple[float, float, float] = (0.07, 0.07, 0.13)) -> Image.Image:
+    """白模 × 属性色（模拟 modulate 乘法），返回展平到指定底色的图。"""
     w, h = gray.size
     out = Image.new("RGB", (w, h))
     sp, dp = gray.load(), out.load()
     for y in range(h):
         for x in range(w):
             r, g, b, a = sp[x, y]
-            bg = (0.07, 0.07, 0.13)     # 游戏深蓝底
             dr = int(round((r / 255.0 * rgb[0] * a / 255.0 + bg[0] * (1 - a / 255.0)) * 255))
             dg = int(round((g / 255.0 * rgb[1] * a / 255.0 + bg[1] * (1 - a / 255.0)) * 255))
             db = int(round((b / 255.0 * rgb[2] * a / 255.0 + bg[2] * (1 - a / 255.0)) * 255))
@@ -174,26 +174,34 @@ def dye(gray: Image.Image, rgb: tuple[float, float, float]) -> Image.Image:
 
 
 def preview(new: Image.Image) -> None:
-    """新旧对比板：上排旧版 / 下排新版，各 ×4 属性色，6 倍放大。"""
+    """新旧对比板：深蓝底（游戏）/ 亮灰底各一块；每格 = 1× 实际尺寸 + 6× 放大。"""
     old = Image.open(OLD).convert("RGBA") if OLD.exists() else None
     Z = 6
-    bw = SIZE * Z + 24
-    rows = (2 if old else 1) * len(ATTR)
-    bh = rows * (SIZE * Z + 34) + 60
-    im = Image.new("RGB", (bw * len(ATTR) + 24, bh), (18, 18, 33))
+    cell_w = SIZE * Z + SIZE + 26
+    bw = 34 + cell_w * len(ATTR)
+    row_h = SIZE * Z + 24
+    panels = [("dark bg (in-game)", (18, 18, 33)), ("light bg", (150, 150, 150))]
+    ph = 16 + row_h * (2 if old is not None else 1) + 6
+    im = Image.new("RGB", (bw, ph * len(panels) + 8), (60, 60, 60))
     d = ImageDraw.Draw(im)
-    y0 = 12
-    if old is not None:
-        d.text((12, y0), "OLD", fill=(200, 200, 200))
-        for i, (_, rgb) in enumerate(ATTR):
-            cell = dye(old, rgb).resize((SIZE * Z, SIZE * Z), Image.NEAREST)
-            im.paste(cell, (12 + i * bw + 12, y0 + 16))
-        y0 += SIZE * Z + 34
-    d.text((12, y0), "NEW", fill=(120, 255, 160))
-    for i, (name, rgb) in enumerate(ATTR):
-        cell = dye(new, rgb).resize((SIZE * Z, SIZE * Z), Image.NEAREST)
-        im.paste(cell, (12 + i * bw + 12, y0 + 16))
-        d.text((12 + i * bw + 14, y0 + 16 + SIZE * Z + 2), name, fill=(160, 160, 160))
+    y = 4
+    for pname, bg8 in panels:
+        bg = (bg8[0] / 255.0, bg8[1] / 255.0, bg8[2] / 255.0)
+        d.rectangle([0, y, bw, y + ph], fill=bg8)
+        d.text((8, y + 2), pname, fill=(220, 220, 120))
+        yy = y + 14
+        for tag, spr in (("OLD", old), ("NEW", new)):
+            if spr is None:
+                continue
+            d.text((8, yy + row_h // 2), tag, fill=(235, 235, 235))
+            for i, (_, rgb) in enumerate(ATTR):
+                x0 = 34 + i * cell_w
+                flat = dye(spr, rgb, bg)
+                im.paste(flat, (x0, yy + (SIZE * Z - SIZE) // 2))
+                big = flat.resize((SIZE * Z, SIZE * Z), Image.NEAREST)
+                im.paste(big, (x0 + SIZE + 8, yy))
+            yy += row_h
+        y += ph + 4
     im.save(OUT_PREVIEW)
 
 
