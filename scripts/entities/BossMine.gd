@@ -14,12 +14,7 @@ extends Damageable
 
 const POOL_KEY := "boss_mine"
 
-const R := 16.0            # 碰撞半径 / 器形半径
-const LIFE := 8.0          # 存在时长：8s 自毁（设计 §D L5 相④）
-const ARM := 0.55          # 布设后的保险期，这段时间不判定玩家（防贴脸瞬爆）
-const BLAST_R := 150.0     # 引爆半径
-const DMG := 12            # 引爆伤害
-const FADE := 1.2          # 最后这么多秒开始闪烁预警
+## 数值一律取自 EnemyCfg（与敷设者的雷是同一件器形）—— 本文件只留逻辑。
 
 ## 由 Boss 显式注入：特效挂载容器 + 玩家引用（引爆判定用）
 var world: Node2D = null
@@ -66,7 +61,7 @@ func _ready() -> void:
 	z_index = 12
 	var cs := CollisionShape2D.new()
 	var sh := CircleShape2D.new()
-	sh.radius = R
+	sh.radius = EnemyCfg.MINE_R
 	cs.shape = sh
 	add_child(cs)
 
@@ -76,7 +71,7 @@ func _process(delta: float) -> void:
 		return
 	_t += delta
 	_flash = maxf(0.0, _flash - delta)
-	if _t >= LIFE:
+	if _t >= EnemyCfg.MINE_LIFE:
 		_boom()
 		return
 	queue_redraw()
@@ -98,12 +93,12 @@ func _boom() -> void:
 	visible = false
 	if world != null and is_instance_valid(world):
 		Fx.burst(world, position, Game.COLOR_GLOW[color], 16, 340.0, 0.65)
-		Fx.ring(world, position, Game.COLOR_MAIN[color], 10.0, BLAST_R, 0.35, 7.0)
-		Fx.shock(world, position, Game.COLOR_CORE[color], BLAST_R, 0.5)
-	# 半径内判定玩家（ARM 之前不判，防刚落地就贴脸瞬爆）
-	if _t >= ARM and player_ref != null and is_instance_valid(player_ref):
-		if player_ref.position.distance_to(position) <= BLAST_R + R:
-			player_ref.take_hit(color, DMG)
+		Fx.ring(world, position, Game.COLOR_MAIN[color], 10.0, EnemyCfg.MINE_BLAST_R, 0.35, 7.0)
+		Fx.shock(world, position, Game.COLOR_CORE[color], EnemyCfg.MINE_BLAST_R, 0.5)
+	# 半径内判定玩家（EnemyCfg.MINE_ARM 之前不判，防刚落地就贴脸瞬爆）
+	if _t >= EnemyCfg.MINE_ARM and player_ref != null and is_instance_valid(player_ref):
+		if player_ref.position.distance_to(position) <= EnemyCfg.MINE_BLAST_R + EnemyCfg.MINE_R:
+			player_ref.take_hit(color, EnemyCfg.MINE_DMG)
 	_kill()
 
 
@@ -126,28 +121,28 @@ func _draw() -> void:
 	var g: Color = Game.COLOR_GLOW[color]
 	var k: Color = Game.COLOR_CORE[color]
 	var dk: Color = Game.COLOR_DARK[color]
-	# 引信：最后 FADE 秒开始快闪，越接近自毁闪得越急（读得出来，不靠背板）
-	var left := LIFE - _t
+	# 引信：最后 EnemyCfg.MINE_FADE 秒开始快闪，越接近自毁闪得越急（读得出来，不靠背板）
+	var left := EnemyCfg.MINE_LIFE - _t
 	var blink := 1.0
-	if left < FADE:
-		blink = 0.45 + 0.55 * absf(sin(_t * (6.0 + 14.0 * (1.0 - left / FADE))))
+	if left < EnemyCfg.MINE_FADE:
+		blink = 0.45 + 0.55 * absf(sin(_t * (6.0 + 14.0 * (1.0 - left / EnemyCfg.MINE_FADE))))
 	# ① 外圈引力场（越接近引爆越亮）
-	draw_circle(Vector2.ZERO, R + 9.0, Color(g.r, g.g, g.b, 0.10 * blink))
-	draw_arc(Vector2.ZERO, R + 6.0, 0.0, TAU, 24,
+	draw_circle(Vector2.ZERO, EnemyCfg.MINE_R + 9.0, Color(g.r, g.g, g.b, 0.10 * blink))
+	draw_arc(Vector2.ZERO, EnemyCfg.MINE_R + 6.0, 0.0, TAU, 24,
 		Color(g.r, g.g, g.b, 0.35 * blink), 2.0, true)
 	# ② 壳体（八边，机械雷）
 	var shell := PackedVector2Array()
 	for i in 8:
-		shell.append(Vector2.RIGHT.rotated(TAU * float(i) / 8.0) * R)
+		shell.append(Vector2.RIGHT.rotated(TAU * float(i) / 8.0) * EnemyCfg.MINE_R)
 	draw_colored_polygon(shell, dk)
 	# ③ 核心（MAIN 底 + CORE 亮核，随引信脉动）
-	draw_circle(Vector2.ZERO, R * 0.62, m)
-	draw_circle(Vector2.ZERO, R * 0.34, Color(k.r, k.g, k.b, blink))
+	draw_circle(Vector2.ZERO, EnemyCfg.MINE_R * 0.62, m)
+	draw_circle(Vector2.ZERO, EnemyCfg.MINE_R * 0.34, Color(k.r, k.g, k.b, blink))
 	# ④ 四向尖刺（读作「别踩」）
 	for i in 4:
 		var a := TAU * float(i) / 4.0 + 0.4
-		var p0 := Vector2.RIGHT.rotated(a) * (R - 2.0)
-		var p1 := Vector2.RIGHT.rotated(a) * (R + 11.0)
+		var p0 := Vector2.RIGHT.rotated(a) * (EnemyCfg.MINE_R - 2.0)
+		var p1 := Vector2.RIGHT.rotated(a) * (EnemyCfg.MINE_R + 11.0)
 		draw_line(p0, p1, Color(m.r, m.g, m.b, 0.9), 3.0, true)
 	if _flash > 0.0:
-		draw_circle(Vector2.ZERO, R + 4.0, Color(1.0, 1.0, 1.0, _flash * 2.0))
+		draw_circle(Vector2.ZERO, EnemyCfg.MINE_R + 4.0, Color(1.0, 1.0, 1.0, _flash * 2.0))

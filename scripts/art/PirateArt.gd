@@ -251,7 +251,7 @@ static func _tails(ci: CanvasItem, c: int, s: float, jy: float, col: Color) -> v
 
 
 # ================================================================ 星盗战将
-## 星盗战将（精英机，碰撞半径 34，造型 r ≤ 40，法罡弧内缘 43 留 3px 呼吸）
+## 星盗战将（精英机，碰撞半径 34，造型 r ≤ 40，力场弧内缘 43 留 3px 呼吸）
 ## 独立重画的机械底盘（不再与星盗同剪影）：四色共用同一套几何，只换调色板。
 ## 敌我识别五条通道落点：
 ##   ① 无 CANOPY 舱盖色（敌方一致）；② CORE 光学窗在 −X（质心 −15.77）；
@@ -307,7 +307,7 @@ static func draw_elite(ci: CanvasItem, c: int, t: float, phase: float) -> void:
 	_rect_s(ci, Rect2(-10.0, 2.0, 4.0, 3.0), k, s)           # OPTIC_S 副光学窗
 
 
-## 星盗战将尾部：星盗同母题 ×~1.25（再大会捅穿法罡弧内缘 43）
+## 星盗战将尾部：星盗同母题 ×~1.25（再大会捅穿力场弧内缘 43）
 static func _tails_elite(ci: CanvasItem, c: int, s: float, jy: float,
 		col: Color) -> void:
 	match c:

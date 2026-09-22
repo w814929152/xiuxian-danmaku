@@ -16,28 +16,8 @@ extends Area2D
 
 enum T { HEAL, MULTI, ATK, INVINC }
 
-const N := 4
-
-## 名称 / 拾取飘字 / 主色 / 器形上的一字
-const CN := ["修复包", "刃影模块", "增幅核心", "力场罩"]
-const TIP := ["生命 +20", "弹道 +1", "攻击 +30%", "无敌 6 秒"]
-const GLYPH := ["修", "影", "增", "力"]
-const COL := [
-	Color(0.42, 0.95, 0.55),   # 修复 · 青绿
-	Color(0.45, 0.80, 1.00),   # 刃影 · 天蓝
-	Color(1.00, 0.62, 0.22),   # 增幅 · 橙
-	Color(1.00, 0.92, 0.45),   # 力场 · 明黄
-]
-
-## 掉落权重（相对值，不必归一）—— 修复包略高，力场罩略低
-const WEIGHT: Array[int] = [30, 24, 26, 20]
-
-const R := 21.0            # 拾取半径
-const DRIFT := -58.0       # 随场景一起向左漂
-const BOB_A := 13.0        # 上下浮动幅度
-const BOB_F := 1.15        # 上下浮动频率
-const LIFE := 15.0         # 存在时长，超时淡出
-const FADE := 1.5          # 最后这么多秒开始闪烁淡出
+## 数值 / 文案 / 配色一律取自 PickupCfg（效果数值在 PlayerCfg）。
+## 改道具请去那两个文件 —— 本文件只留逻辑。
 
 var kind: int = T.HEAL
 ## 由 Level 显式注入：拾取特效的挂载容器
@@ -79,12 +59,12 @@ func _enter(parent: Node2D) -> void:
 ## 按权重随机一种（Level 掉落时用）
 static func random_kind() -> int:
 	var total := 0
-	for w in WEIGHT:
+	for w in PickupCfg.WEIGHT:
 		total += int(w)
 	var roll := randi() % total
 	var acc := 0
-	for i in N:
-		acc += int(WEIGHT[i])
+	for i in PickupCfg.N:
+		acc += int(PickupCfg.WEIGHT[i])
 		if roll < acc:
 			return i
 	return T.HEAL
@@ -96,7 +76,7 @@ func _ready() -> void:
 	z_index = 15
 	var cs := CollisionShape2D.new()
 	var sh := CircleShape2D.new()
-	sh.radius = R
+	sh.radius = PickupCfg.R
 	cs.shape = sh
 	add_child(cs)
 	area_entered.connect(_on_area_entered)
@@ -107,9 +87,9 @@ func _process(delta: float) -> void:
 		return
 	_t += delta
 	_spin += delta
-	position.x += DRIFT * delta
-	position.y = _base_y + sin(_t * BOB_F * TAU) * BOB_A
-	if position.x < -60.0 or _t >= LIFE:
+	position.x += PickupCfg.DRIFT * delta
+	position.y = _base_y + sin(_t * PickupCfg.BOB_F * TAU) * PickupCfg.BOB_A
+	if position.x < -60.0 or _t >= PickupCfg.LIFE:
 		queue_free()
 		return
 	queue_redraw()
@@ -131,22 +111,22 @@ func _on_area_entered(a: Area2D) -> void:
 func _taken(p: Player) -> void:
 	_alive = false
 	var gain := p.apply_pickup(kind)
-	Fx.ring(world, position, COL[kind], 8.0, 56.0, 0.36, 6.0)
-	Fx.burst(world, position, COL[kind], 12, 220.0, 0.45)
+	Fx.ring(world, position, PickupCfg.COL[kind], 8.0, 56.0, 0.36, 6.0)
+	Fx.burst(world, position, PickupCfg.COL[kind], 12, 220.0, 0.45)
 	# gain 为空串表示已满 / 无需提示（例如满血吃修复包）
 	if gain != "":
-		Fx.pop(world, position + Vector2(0.0, -26.0), gain, COL[kind], 19, 0.9)
+		Fx.pop(world, position + Vector2(0.0, -26.0), gain, PickupCfg.COL[kind], 19, 0.9)
 	queue_free()
 
 
 func _draw() -> void:
-	var c: Color = COL[kind]
+	var c: Color = PickupCfg.COL[kind]
 	var k: Color = Color(1.0, 1.0, 1.0, 0.92)
 	var pulse := 0.5 + 0.5 * sin(_t * 4.0)
 
 	# 超时前的闪烁提示
 	var a := 1.0
-	if _t > LIFE - FADE:
+	if _t > PickupCfg.LIFE - PickupCfg.FADE:
 		a = 0.35 + 0.65 * (0.5 + 0.5 * sin(_t * 22.0))
 	modulate.a = a
 
@@ -168,5 +148,5 @@ func _draw() -> void:
 
 	# 内芯 + 一字
 	draw_circle(Vector2.ZERO, 9.0, Color(c.r, c.g, c.b, 0.30))
-	DrawUtil.txt(self, GLYPH[kind], Vector2(0.0, 7.0), 17, k,
+	DrawUtil.txt(self, PickupCfg.GLYPH[kind], Vector2(0.0, 7.0), 17, k,
 		HORIZONTAL_ALIGNMENT_CENTER)

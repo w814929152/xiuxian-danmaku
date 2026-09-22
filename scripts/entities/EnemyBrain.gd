@@ -17,16 +17,7 @@ extends RefCounted
 ## ---------------------------------------------------------------
 
 ## ② 变节者：核心在玩家两件战甲色之间轮换的间隔（秒）
-const DEFECTOR_SWAP := 3.5
-## ② 变节者：换色瞬间的破绽窗口（秒）—— 此间任意色 ×2
-const DEFECTOR_WINDOW := 0.6
-## ① 拆解者：死亡分裂出的小片数
-const DISMANTLER_SHARDS := 2
-## ④ 敷设者：雷的自毁时长（秒）
-const LAYER_MINE_LIFE := 8.0
-## ⑦ 相位者：折跃 + 无敌的节奏
-const PHASER_CYCLE := 2.6
-const PHASER_INVULN := 1.1
+## 独有怪数值一律取自 EnemyCfg —— 本文件只留逻辑。
 
 
 ## 运动分发：由 Enemy._motion 在 kind != GRUNT 时调用
@@ -126,7 +117,7 @@ static func _move_defector(e: Enemy, delta: float) -> void:
 		e._entered = true
 	e._brain_timer -= delta
 	if e._brain_timer <= 0.0:
-		e._brain_timer = DEFECTOR_SWAP
+		e._brain_timer = EnemyCfg.DEFECTOR_SWAP
 		_swap_defector_color(e)
 
 
@@ -137,7 +128,7 @@ static func _swap_defector_color(e: Enemy) -> void:
 	var next := s[0] if e.color == s[1] else s[1]
 	e.color = next
 	# 破绽窗口：此间命中任意色 ×2 —— 用独立字段承载（不占 _flash，避免被 hit 白闪重置）
-	e._ward_window = DEFECTOR_WINDOW
+	e._ward_window = EnemyCfg.DEFECTOR_WINDOW
 	e._t = 0.0   # 换色瞬间重置动画相位，翼面折射闪一次
 
 
@@ -216,7 +207,7 @@ static func _lay_mine(e: Enemy) -> void:
 	m.speed = 0.0
 	m._entered = true
 	m._leaving = true
-	m._life = LAYER_MINE_LIFE   # 8s 自毁
+	m._life = EnemyCfg.MINE_LIFE   # 8s 自毁
 	m.hp = 12
 	m.max_hp = 12
 	m.score = EnemyKind.MINE_SCORE   # 雷不给分（否则玩家会为分去刷雷）
@@ -255,12 +246,7 @@ static func _fire_siphon(e: Enemy) -> void:
 ## 高速直冲玩家；死/撞都爆半径 150 冲击环（冲击环在 Enemy._die 里画）。
 ## 颜色 ∈ 四色，照常吃共振；冲撞伤害走「物理碰撞」通道——直接扣血，
 ## 不经 Player.take_hit 的同色吸收判定，因此换甲救不了（见 _contact_player）。
-const MARTYR_CONTACT := 26.0
-const MARTYR_DMG := 20
-## 殉爆者自爆冲击环伤害（设计 §C.5 ⑥：半径 150，伤害 15，物理通道）
-const MARTYR_SHOCK_DMG := 15
-## 殉爆者自爆抛出的破片数（设计 §C.5 ⑥：8 片，继承本体色，正常四色弹可被同色甲免疫）
-const MARTYR_SHARDS := 8
+## 独有怪数值一律取自 EnemyCfg —— 本文件只留逻辑。
 
 static func _move_martyr(e: Enemy, delta: float) -> void:
 	var dir := e._aim()
@@ -269,7 +255,7 @@ static func _move_martyr(e: Enemy, delta: float) -> void:
 		e.position.x -= e.speed * 1.9 * delta
 		e.position.y = move_toward(e.position.y, e.player_ref.position.y, 150.0 * delta)
 		# 物理碰撞：贴到玩家即爆（换甲不免疫）
-		if e.position.distance_to(e.player_ref.position) < MARTYR_CONTACT + 12.0:
+		if e.position.distance_to(e.player_ref.position) < EnemyCfg.MARTYR_CONTACT + 12.0:
 			_contact_player(e)
 			return
 	else:
@@ -283,7 +269,7 @@ static func _contact_player(e: Enemy) -> void:
 	if e.player_ref != null and is_instance_valid(e.player_ref):
 		var p: Player = e.player_ref
 		if p.alive:
-			p.hp -= MARTYR_DMG
+			p.hp -= EnemyCfg.MARTYR_DMG
 			if p.hp <= 0:
 				p.hp = 0
 				p._die()
@@ -297,10 +283,10 @@ static func martyr_explode(e: Enemy) -> void:
 	if e.world == null or not is_instance_valid(e.world):
 		return
 	# ① 冲击环：半径 150 内的玩家吃 15 点「物理通道」伤害（不经 Player.take_hit 同色吸收）
-	_physical_shock(e, MARTYR_SHOCK_DMG, 150.0)
+	_physical_shock(e, EnemyCfg.MARTYR_SHOCK_DMG, 150.0)
 	# ② 8 片破片：继承本体色 e.color（∈ S），作为正常敌弹入 world，可被同色甲免疫
-	for i in MARTYR_SHARDS:
-		var a := TAU * float(i) / float(MARTYR_SHARDS)
+	for i in EnemyCfg.MARTYR_SHARDS:
+		var a := TAU * float(i) / float(EnemyCfg.MARTYR_SHARDS)
 		var dir := Vector2.RIGHT.rotated(a)
 		_martyr_shard(e.world, e.color, e.position, dir)
 
@@ -341,13 +327,13 @@ static func _move_phaser(e: Enemy, delta: float) -> void:
 	# 折跃节拍
 	e._brain_timer -= delta
 	if e._brain_timer <= 0.0:
-		e._brain_timer = PHASER_CYCLE
+		e._brain_timer = EnemyCfg.PHASER_CYCLE
 		_phase_jump(e)
 
 
 static func _phase_jump(e: Enemy) -> void:
 	# 无敌窗口：用独立字段承载（不占 _flash，避免被 hit 白闪重置）
-	e._phase_invuln = PHASER_INVULN
+	e._phase_invuln = EnemyCfg.PHASER_INVULN
 	# 折跃到玩家脸上（有玩家则贴脸，否则原地闪烁）
 	if e.player_ref != null and is_instance_valid(e.player_ref):
 		var p: Vector2 = e.player_ref.position

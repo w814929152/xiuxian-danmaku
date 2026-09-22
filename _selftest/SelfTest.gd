@@ -22,12 +22,17 @@ func _ready() -> void:
 	await _test_yellow()
 	await _test_pickup()
 	await _test_elite()
+	await _test_elite_hues()   # 战将多色弹幕：铁律 + 色序 + 力场色占比
+	_test_elite_new()          # 新精英（堡垒/指挥/护盾）：铁律 + 护盾方向判定
 	await _test_pool()
 	await _test_vector_static()   # 07 §2.4：敌方矢量活体静态检查 V0~V4
 	await _test_wording()         # 术语红线：全库不得出现旧称
+	_test_cfg_source()        # 配置集中：实体文件不许自带数值常量 + 文案同源
 	await _test_level()
 	await _test_wave_colors()
 	await _test_boss()
+	await _test_l3_vent()      # L3 散热期专项：倍率 + 阶段切换窗口（断崖修复的回归网）
+	await _test_hold_wave()    # 驻留阵地波：形式对比 + 屏内跃迁入场（提案 §3 的回归网）
 	await _test_score_persist()
 	await _test_legacy_inherit()
 	await _test_death()
@@ -54,6 +59,23 @@ func _ck(cond: bool, msg: String) -> void:
 	if not cond:
 		_fails.append(msg)
 	print("[ck] %s  %s" % ["PASS" if cond else "FAIL", msg])
+
+
+## 清空当前所有飘字文案。Fx 走对象池会复用节点，靠「文本比对」会漏判；
+## 先清空，之后凡是非空文案必然是刚飘出来的。
+func _clear_pops() -> void:
+	for ch in get_children():
+		if ch is Fx:
+			ch.text = ""
+
+
+## 取当前仍在场上的飘字文案集合
+func _pop_texts() -> Array:
+	var out: Array = []
+	for ch in get_children():
+		if ch is Fx and not str(ch.text).is_empty():
+			out.append(str(ch.text))
+	return out
 
 
 ## 走真实输入通道（parse_input_event -> _unhandled_input）
@@ -135,40 +157,74 @@ func _test_player() -> void:
 	await _frames(2)
 	_ck(p.color == Game.WHITE, "初始皮肤 = 光子(白)")
 	_ck(p.shield == 0, "护盾开局为 0（不再自带满盾）")
-	_ck(Player.SHIELD_MAX == 20, "护盾上限常量 = 20")
-	_ck(Player.SHIELD_GAIN == 10, "单次充能常量 = 10")
+	_ck(PlayerCfg.SHIELD_MAX == 20, "护盾上限常量 = 20")
+	_ck(PlayerCfg.SHIELD_GAIN == 10, "单次充能常量 = 10")
 
 	# ---------- 充能：白甲吸收白弹 ----------
 	# 白弹撞白甲走的是 take_hit() 的**同色吸收**分支：不掉血、弹幕消失，
 	# 光子盾甲额外把这一发转成护盾充能。
 	var used := p.take_hit(Game.WHITE, 10)
 	_ck(used == true, "白皮肤吸收白弹（弹幕消失）")
-	_ck(p.hp == Player.MAX_HP, "吸收后血量不变")
-	_ck(p.shield == Player.SHIELD_GAIN, "白甲吸收光子弹 -> 护盾 0 -> 10")
+	_ck(p.hp == PlayerCfg.MAX_HP, "吸收后血量不变")
+	_ck(p.shield == PlayerCfg.SHIELD_GAIN, "白甲吸收光子弹 -> 护盾 0 -> 10")
 	# 再钉一次**绝对值**：上面那条拿的是常量，常量本身被改小它照样绿
 	_ck(p.shield == 10, "单次充能绝对值 = 10")
 
 	p._invuln = 0.0
 	p.take_hit(Game.WHITE, 10)
-	_ck(p.shield == Player.SHIELD_MAX, "再吸收一枚 -> 护盾 10 -> 20（满值）")
+	_ck(p.shield == PlayerCfg.SHIELD_MAX, "再吸收一枚 -> 护盾 10 -> 20（满值）")
 	_ck(p.shield == 20, "护盾上限绝对值 = 20")
-	_ck(p.hp == Player.MAX_HP, "充能期间不掉血")
+	_ck(p.hp == PlayerCfg.MAX_HP, "充能期间不掉血")
 
 	p._invuln = 0.0
 	p.take_hit(Game.WHITE, 10)
-	_ck(p.shield == Player.SHIELD_MAX, "满值后继续吸收 -> 仍为 20（上限钳制，不溢出）")
-	_ck(p.hp == Player.MAX_HP, "满值吸收同样不掉血")
+	_ck(p.shield == PlayerCfg.SHIELD_MAX, "满值后继续吸收 -> 仍为 20（上限钳制，不溢出）")
+	_ck(p.hp == PlayerCfg.MAX_HP, "满值吸收同样不掉血")
+
+	# M8 回归闸：护盾未满但剩余容量不足 10 时（如 15/20），飘字必须写**实际增量**，
+	# 而不是写死的 SHIELD_GAIN —— 「飘 +10 实际只加 5」是这里最容易写错的样子。
+	p.shield = 15
+	p._invuln = 0.0
+	_clear_pops()
+	p.take_hit(Game.WHITE, 10)
+	_ck(p.shield == 20, "余量不足 10 时吸收 -> 钳到 20（不溢出到 25）")
+	_ck(_pop_texts().has("护盾 +5"), "充能飘字写实际增量 -> 「护盾 +5」（非写死 +10）")
+	# 满值后再吸：不得溢出，且飘「护盾已满」而非 +10
+	_clear_pops()
+	p._invuln = 0.0
+	p.take_hit(Game.WHITE, 10)
+	_ck(p.shield == 20, "满值吸收后护盾仍为 20")
+	_ck(_pop_texts().has("护盾已满"), "满值吸收飘「护盾已满」")
+
+	# ---------- 力场罩期间吸光子弹照样充能（任务 1 回归闸） ----------
+	# 力场罩的语义是「弹幕穿过」，但裁决是「吞下的光子弹仍要转成护盾」——
+	# 所以充能判定排在力场罩早退之前。这里钉三件事：
+	#   ① 力场罩生效中吸白弹 -> 照常 +10（把充能挪回力场罩分支之后会变 0，此条即红）；
+	#   ② 一发只充一次：若两条分支各充一次会是 20，shield == 10 这条即红；
+	#   ③ 返回值仍为 false —— 力场罩是「穿过」不是「吸收」，充能不改变这个语义。
+	p.shield = 0
+	p._invuln = 0.0
+	p.invinc = 5.0
+	_clear_pops()
+	var ff_used := p.take_hit(Game.WHITE, 10)
+	_ck(p.shield == 10, "力场罩期间吸光子弹 -> 照常充能 10（不被六秒无敌吞掉）")
+	_ck(p.shield != 20, "一发弹只充一次（力场罩分支与同色吸收分支不重复充能）")
+	_ck(ff_used == false, "力场罩充能后弹幕仍穿过（返回值 false，语义不变）")
+	_ck(p.hp == PlayerCfg.MAX_HP, "力场罩期间不掉血")
+	_ck(_pop_texts().has("护盾 +10"), "力场罩期间充能飘字正常 -> 「护盾 +10」")
+	p.invinc = 0.0
+	p.shield = 20      # 还原到满值状态，衔接下面的异色减伤用例（它期望进入时盾为 20）
 
 	# ---------- 护盾仍按既有规则为光子盾甲减伤 ----------
 	p._invuln = 0.0
 	p.take_hit(Game.RED, 12)
 	_ck(p.shield == 8, "白甲吃异色弹：护盾吸收 12 点 -> 剩 8")
-	_ck(p.hp == Player.MAX_HP, "护盾吸收期间不掉血")
+	_ck(p.hp == PlayerCfg.MAX_HP, "护盾吸收期间不掉血")
 
 	p._invuln = 0.0
 	p.take_hit(Game.BLUE, 12)
 	_ck(p.shield == 0, "护盾耗尽")
-	_ck(p.hp == Player.MAX_HP - 4, "溢出伤害 4 点扣血")
+	_ck(p.hp == PlayerCfg.MAX_HP - 4, "溢出伤害 4 点扣血")
 
 	# ---------- 取消自动回复 ----------
 	# 此刻护盾正好是 0 —— 旧机制「无伤一段时间后回满」最容易被重新接回来的入口。
@@ -202,6 +258,16 @@ func _test_player() -> void:
 	_ck(p.hp == hp_r0 - 10, "红甲吃白弹扣血 10")
 	_ck(p.shield == 0, "非光子盾甲吃白弹**不**充能（护盾仍为 0）")
 
+	# M9 回归闸：护盾的**减伤**同样只认光子盾甲 —— 非白甲即便 shield > 0 也
+	# 不得借护盾减伤（数值保留但不生效），更不得被消耗。
+	p.shield = 20
+	p._invuln = 0.0
+	var hp_r1 := p.hp
+	_ck(p.take_hit(Game.BLUE, 20) == true, "红甲（盾 20）吃蓝弹 -> 正常受伤结算")
+	_ck(p.hp == hp_r1 - 20, "非白甲有盾吃异色弹 -> 全额扣血 20（护盾不减伤）")
+	_ck(p.shield == 20, "非白甲受伤不消耗护盾（数值原样保留）")
+	p.shield = 0        # 还原，免得污染后面的用例
+
 	p._invuln = 0.0
 	_ck(p.take_hit(Game.RED, 10) == true, "红皮肤吸收红弹（弹幕消失）")
 	p._invuln = 0.0
@@ -210,7 +276,7 @@ func _test_player() -> void:
 	# 移速：红 vs 蓝
 	p.armors = [Game.RED, Game.BLUE]
 	p.armor_idx = 0
-	p.hp = Player.MAX_HP
+	p.hp = PlayerCfg.MAX_HP
 	p.position = Vector2(300.0, 360.0)
 	await _frames(2)
 	Input.action_press("mv_right")
@@ -284,7 +350,7 @@ func _test_dodge() -> void:
 	p.armor_idx = 0
 	await _frames(2)
 	_ck(p.color == Game.BLUE, "闪避用例：穿上寒霜疾甲(蓝)")
-	_ck(is_equal_approx(Player.DODGE_TIME, 0.5), "闪避时长常量 = 0.5 秒")
+	_ck(is_equal_approx(PlayerCfg.DODGE_TIME, 0.5), "闪避时长常量 = 0.5 秒")
 
 	# ---------- ① 蓝色甲吃到蓝色弹 -> 进入闪避 ----------
 	p._invuln = 0.0
@@ -301,11 +367,11 @@ func _test_dodge() -> void:
 	_ck(p.take_hit(Game.RED, 20) == false,
 		"② 闪避期间吃异色弹 -> take_hit 返回 false（弹幕穿透）")
 	_ck(p.hp == hp1, "② 闪避期间不掉血")
-	# 旧断言「闪避不打断十息回盾计时（_no_hit 未被清零）」随自动回复一起删除了 ——
+	# 旧断言「闪避不打断十秒回盾计时（_no_hit 未被清零）」随自动回复一起删除了 ——
 	# 那条语义已不存在。换成一条**等价有力**的：闪避的 return false 发生在
 	# 受击结算（_invuln = INVULN）之前，所以闪避不额外赠送 0.85 秒无敌帧；
 	# 否则「闪避 0.5 秒 + 受击无敌 0.85 秒」会悄悄叠成 1.35 秒的免伤窗口。
-	p._dodge = Player.DODGE_TIME
+	p._dodge = PlayerCfg.DODGE_TIME
 	p._invuln = 0.0
 	var hp1b := p.hp
 	_ck(p.take_hit(Game.YELLOW, 20) == false, "② 闪避期间吃黄弹 -> 穿透（返回 false）")
@@ -314,7 +380,7 @@ func _test_dodge() -> void:
 
 	# 真链路：让一颗异色弹压在闪避中的玩家身上 —— 它应当**穿过**而不是被吃掉
 	p.position = Vector2(420.0, 360.0)
-	p._dodge = Player.DODGE_TIME
+	p._dodge = PlayerCfg.DODGE_TIME
 	await _frames(2)
 	var dd := Danmaku.spawn(self, Game.RED, p.position, Vector2.ZERO, 10, 9.0)
 	_ck(dd != null, "② 穿透链路：异色测试弹生成成功")
@@ -325,12 +391,12 @@ func _test_dodge() -> void:
 				break
 		_ck(dd._alive, "② 闪避期间异色弹穿过玩家继续飞行（未被消耗）")
 		if not dd._alive:
-			p._dodge = Player.DODGE_TIME       # 弹没了说明断言已失败，别让后续用例连锁失败
+			p._dodge = PlayerCfg.DODGE_TIME       # 弹没了说明断言已失败，别让后续用例连锁失败
 		dd.dissolve()
 	await _frames(2)
 
 	# ---------- ③ 0.5 秒后自动结束（轮询，不数帧）----------
-	p._dodge = Player.DODGE_TIME
+	p._dodge = PlayerCfg.DODGE_TIME
 	p._invuln = 0.0
 	var ended := false
 	for _i in 400:
@@ -347,7 +413,7 @@ func _test_dodge() -> void:
 
 	# ---------- ④ 切甲后闪避立刻失效 ----------
 	p._invuln = 0.0
-	p._dodge = Player.DODGE_TIME
+	p._dodge = PlayerCfg.DODGE_TIME
 	_ck(p.dodging, "④ 闪避已置位")
 	p.do_swap()
 	_ck(p.color == Game.RED, "④ 切甲 -> 电浆(红)")
@@ -361,7 +427,7 @@ func _test_dodge() -> void:
 		p.armor_idx = 0
 		p._dodge = 0.0
 		p._invuln = 0.0
-		p.hp = Player.MAX_HP
+		p.hp = PlayerCfg.MAX_HP
 		await _frames(2)
 		_ck(p.color == c, "⑤ 换上 %s" % Game.ARMOR_TITLE[c])
 		_ck(p.take_hit(c, 10) == true, "⑤ %s 吸收同色弹（弹幕消失）" % Game.COLOR_CN[c])
@@ -404,7 +470,7 @@ func _test_yellow() -> void:
 
 	p._invuln = 0.0
 	_ck(p.take_hit(Game.YELLOW, 10) == true, "引力束甲吸收引力弹（弹幕消失）")
-	_ck(p.hp == Player.MAX_HP, "吸收引力弹不掉血")
+	_ck(p.hp == PlayerCfg.MAX_HP, "吸收引力弹不掉血")
 
 	# 过热：出光每秒 +20，封顶 100
 	p.heat = 0.0
@@ -412,7 +478,7 @@ func _test_yellow() -> void:
 	p._update_heat(1.0)
 	_ck(absf(p.heat - 20.0) < 0.01, "出光 1 秒 -> 过热值 +20")
 	p._update_heat(4.5)
-	_ck(absf(p.heat - Player.HEAT_MAX) < 0.01, "过热值封顶 100")
+	_ck(absf(p.heat - PlayerCfg.HEAT_MAX) < 0.01, "过热值封顶 100")
 	_ck(not p.can_fire(), "过热满值 -> 无法出光")
 
 	# 停火 0.5 秒后每秒 -30
@@ -482,7 +548,7 @@ func _test_yellow() -> void:
 	await _frames(2)
 
 	# hover 骚扰敌离场是向右飞出画面的：出右边界必须自我回收，
-	# 否则它永远等不到 free，清场判定会被一路拖到上限（同色潮每重必有 hover）。
+	# 否则它永远等不到 free，清场判定会被一路拖到上限（同色潮每波必有 hover）。
 	var eh := Enemy.new()
 	eh.world = self
 	add_child(eh)
@@ -566,7 +632,7 @@ func _test_pickup() -> void:
 	_ck(p.hp == 70, "修复包 -> 生命 +20")
 	p.hp = 95
 	p.apply_pickup(Pickup.T.HEAL)
-	_ck(p.hp == Player.MAX_HP, "修复包不会超出生命上限")
+	_ck(p.hp == PlayerCfg.MAX_HP, "修复包不会超出生命上限")
 
 	# 刃影模块
 	_ck(p.rows() == 1, "光子盾甲基准单排弹道")
@@ -577,25 +643,31 @@ func _test_pickup() -> void:
 	p.armor_idx = 0
 
 	# 增幅核心
+	# 绝对值锁定：只写 atk_mul == 1 + ATK_STEP 的话，STEP 被改小也照样绿
+	_ck(absf(PlayerCfg.ATK_STEP - 0.10) < 0.0001, "增幅核心单层增幅恒为 +10%%（实测 %d%%）" % int(roundf(PlayerCfg.ATK_STEP * 100.0)))
 	_ck(p.sword_damage() == 10, "基准光刃伤害 10")
 	p.apply_pickup(Pickup.T.ATK)
-	_ck(absf(p.atk_mul - 1.30) < 0.001, "增幅核心 -> 攻击力 +30%")
-	_ck(p.sword_damage() == 13, "光刃伤害 10 -> 13")
+	_ck(absf(p.atk_mul - 1.10) < 0.001, "增幅核心 -> 攻击力 +10%")
+	_ck(p.sword_damage() == 11, "光刃伤害 10 -> 11")
 	_ck(p.sword_size() > 1.0, "光刃变大（外观与碰撞体同步）")
 	_ck(p.beam_width() > 1.0, "引力束变粗")
-	_ck(absf(p.beam_dps() - 120.0 * 1.3) < 0.01, "引力束每秒伤害同步提高到 156")
+	_ck(absf(p.beam_dps() - 120.0 * 1.1) < 0.01, "引力束每秒伤害同步提高到 132")
 
 	# 层数封顶
 	for _i in 8:
 		p.apply_pickup(Pickup.T.MULTI)
 		p.apply_pickup(Pickup.T.ATK)
-	_ck(p.multi == Player.MULTI_MAX, "刃影模块层数封顶 %d 层" % Player.MULTI_MAX)
-	_ck(p.atk_up == Player.ATK_MAX, "增幅核心层数封顶 %d 层" % Player.ATK_MAX)
+	_ck(p.multi == PlayerCfg.MULTI_MAX, "刃影模块层数封顶 %d 层" % PlayerCfg.MULTI_MAX)
+	_ck(p.atk_up == PlayerCfg.ATK_MAX, "增幅核心层数封顶 %d 层" % PlayerCfg.ATK_MAX)
+	_ck(absf(p.atk_mul - (1.0 + PlayerCfg.ATK_STEP * float(PlayerCfg.ATK_MAX))) < 0.0001,
+		"满叠增幅封顶 +%d%%（实测 +%d%%）" % [
+			int(roundf(PlayerCfg.ATK_STEP * float(PlayerCfg.ATK_MAX) * 100.0)),
+			int(roundf((p.atk_mul - 1.0) * 100.0))])
 
 	# 力场罩
 	p.invinc = 0.0
 	p.apply_pickup(Pickup.T.INVINC)
-	_ck(absf(p.invinc - Player.INVINC_TIME) < 0.001, "力场罩 -> 无敌 6 秒")
+	_ck(absf(p.invinc - PlayerCfg.INVINC_TIME) < 0.001, "力场罩 -> 无敌 6 秒")
 	p.hp = 100
 	p._invuln = 0.0
 	_ck(p.take_hit(Game.RED, 10) == false, "力场罩期间免伤（弹幕穿过）")
@@ -671,8 +743,9 @@ func _test_pickup() -> void:
 	for c5 in lv.get_children():
 		if c5 is Pickup:
 			n1 += 1
-	_ck(n1 - n0 == Level.WAVE_DROP,
-		"每波结束刷新 %d 个道具（实测 %d 个）" % [Level.WAVE_DROP, n1 - n0])
+	# 每波刷新数归 StageCfg 管（Level 侧那份 WAVE_DROP 已删，避免同值双源）
+	var wd := StageCfg.wave_drop(lv.stage)
+	_ck(n1 - n0 == wd, "每波结束刷新 %d 个道具（实测 %d 个）" % [wd, n1 - n0])
 	_ck(not lv.has_method("_heal"), "波次结束不再回血（_heal 已移除，生命只靠修复包）")
 
 	# 掉落是概率的：18% 连掉 60 次一次都不出的概率约 6e-6，够确定
@@ -739,26 +812,26 @@ func _test_elite() -> void:
 	_ck(e.max_hp > 400 and e.ward_max > 100,
 		"血厚于星盗喽啰（本体 %d / 力场 %d）" % [e.max_hp, e.ward_max])
 
-	# ---------- 力场分层：异色刮痧，且破罡前本体不掉血 ----------
+	# ---------- 力场分层：异色刮痧，且破力场前本体不掉血 ----------
 	var off := (e.color + 1) % 4
 	var hp0 := e.hp
 	var w0 := e.ward
 	e.hit(100, off)
 	var d_off := w0 - e.ward
 	_ck(e.hp == hp0, "力场未破时本体不掉血")
-	_ck(d_off == int(roundf(100.0 * Elite.WARD_RESIST)),
-		"异色打力场只剩 %d%%（100 -> %d）" % [int(Elite.WARD_RESIST * 100.0), d_off])
+	_ck(d_off == int(roundf(100.0 * EnemyCfg.ELITE_WARD_RESIST)),
+		"异色打力场只剩 %d%%（100 -> %d）" % [int(EnemyCfg.ELITE_WARD_RESIST * 100.0), d_off])
 	# 用 20 点试同色：100 点同色打出来是 150，会一击打爆 150 的力场 ——
-	# 那测的就不是衰减比例而是「恰好破罡」了
+	# 那测的就不是衰减比例而是「恰好破力场」了
 	e.ward = w0
 	e.hit(20, e.color)
 	_ck(w0 - e.ward == 30, "同色打力场全额 +50%%（20 -> %d）" % (w0 - e.ward))
 
-	# ---------- 破罡 -> 虚弱 ----------
+	# ---------- 破力场 -> 虚弱 ----------
 	e.ward = 10
 	e.hit(50, e.color)
 	_ck(e.ward == 0 and e.broken > 0.0, "力场击破 -> 进入虚弱期")
-	_ck(e.layers == Elite.WARD_LAYERS - 1, "破一层扣一次重铸机会（余 %d 次）" % e.layers)
+	_ck(e.layers == EnemyCfg.ELITE_WARD_LAYERS - 1, "破一层扣一次重铸机会（余 %d 次）" % e.layers)
 	var h1 := e.hp
 	e.hit(100, off)
 	_ck(h1 - e.hp == 100, "虚弱期异色对本体全额（不再衰减）")
@@ -799,7 +872,7 @@ func _test_elite() -> void:
 	e.hp = 40
 	e.hit(60, e.color)
 	_ck(_elite_killed, "斩杀战将 -> 发出 killed 信号")
-	_ck(_elite_score == Elite.SCORE, "斩杀奖励 %d 分" % Elite.SCORE)
+	_ck(_elite_score == EnemyCfg.ELITE_SCORE, "斩杀奖励 %d 分" % EnemyCfg.ELITE_SCORE)
 	_ck(e.dead, "死亡标记已置位（清场判定据此放行）")
 	await _frames(2)
 
@@ -810,7 +883,7 @@ func _test_elite() -> void:
 	await _frames(3)
 	var n0 := _count_pickups(lv)
 	lv.stage = 4                 # 战将也要拿关卡号：难度参数由 StageCfg 按关给出
-	lv._spawn_elite(1.15)
+	lv._spawn_elite(1.15, EnemyKind.E.WARRIOR)
 	await _frames(3)
 	var el := _find_elite(lv)
 	_ck(el != null, "关卡可生成星盗战将")
@@ -820,7 +893,7 @@ func _test_elite() -> void:
 		# 战将的弹幕密度就会退回到第 1 关 —— 这种错肉眼根本看不出来。
 		_ck(el.stage == 4, "战将拿到关卡号（实测 %d）" % el.stage)
 		_ck(el.player_armors.size() == 2, "战将拿到玩家战甲（力场只从中抽取）")
-		_ck(el.max_hp > Elite.BASE_HP, "血量按波次系数缩放（第 2 重 %d）" % el.max_hp)
+		_ck(el.max_hp > EnemyCfg.ELITE_BASE_HP, "血量按波次系数缩放（第 2 波 %d）" % el.max_hp)
 		_ck(lv._elite_alive(), "清场判定认得战将（在场即算未清空）")
 		el.ward = 0
 		el.hp = 1
@@ -832,9 +905,351 @@ func _test_elite() -> void:
 	await _frames(3)
 
 
+# ------------------------------------------------------------ 战将多色弹幕
+## ⚠ 回归断言**必须写在本文件**（门禁只跑 `SelfTest.tscn`）——
+##   `MatrixProbe.tscn` / `PaceProbe.tscn` / `WardDiag.tscn` 都是手动跑的独立场景，
+##   写在里面的断言一次都不会执行（2026-09-22 已实测证实过一次）。
+##
+## 覆盖「战将弹幕多色化」（2026-09-22 主理人要求「精英怪要可以发出多色弹幕」）：
+##   ① 色数逐关递进、前两关恒单色（教学期不混色）
+##   ② ★ **可行性铁律**：力场色（那个必须换甲才破的色）恒 ∈ 玩家战甲 S
+##   ③ 掺进来的第二色起 ∉ S —— 玩家吸不了，只能走位
+##   ④ 力场色在齐射里恒占 ≥50%（「为主」的落点）
+##   ⑤ 色序无重复、长度 = 本关色数、首位必是力场色
+func _mk_elite(st: int, armors: Array[int], seq: int = 0) -> Elite:
+	var e := Elite.new()
+	e.stage = st                  # ★ add_child 之前注入（stage 决定弹幕色数）
+	e.world = self
+	add_child(e)
+	e.player_armors = armors
+	e.setup(1.0, 360.0, seq)
+	return e
+
+
+func _test_elite_hues() -> void:
+	print("------ 战将多色弹幕 ------")
+	var armors: Array[int] = [Game.RED, Game.WHITE]
+	var comp := Level._complement(armors)
+
+	# ---------- ① 配置层 ----------
+	var f_seq := ""
+	var cn := ""
+	# ⚠ 关号是 1-based：`for s in STAGE_N` 是 0..4，会把 L1 算两遍、**L5 一次都问不到**
+	#   （`_i()` 有 clampi 兜底不报错，所以静默少测一关）。这条今天已经踩第二次了。
+	for s in range(1, StageCfg.STAGE_N + 1):
+		var n := StageCfg.elite_hue_n(s)
+		if not cn.is_empty():
+			cn += " / "
+		cn += "L%d:%d" % [s, n]
+		if s > 1 and n < StageCfg.elite_hue_n(s - 1) and f_seq.is_empty():
+			f_seq = "L%d(%d) < L%d(%d)" % [s, n, s - 1, StageCfg.elite_hue_n(s - 1)]
+	_ck(f_seq.is_empty(), "色数逐关非递减（%s）" % cn + _bad(f_seq))
+	_ck(StageCfg.elite_hue_n(1) == 1 and StageCfg.elite_hue_n(2) == 1,
+		"前两关恒单色（教学期不混色，实测 %d / %d）"
+			% [StageCfg.elite_hue_n(1), StageCfg.elite_hue_n(2)])
+	_ck(StageCfg.elite_hue_n(3) == 2 and StageCfg.elite_hue_n(5) == 4,
+		"L3 双色 / L5 四色（实测 %d / %d）"
+			% [StageCfg.elite_hue_n(3), StageCfg.elite_hue_n(5)])
+
+	# ---------- ②~⑤ 逐关 × 每关摇 24 只（色是随机的，只跑一次盖不住）----------
+	var f_s := ""       # 铁律：力场色 ∉ S
+	var f_len := ""     # 色序长度 / 首位
+	var f_out := ""     # 掺进来的色落在 S 里（那就吸得掉了，不成其为骚扰色）
+	var f_dup := ""     # 色序有重复
+	var f_main := ""    # 力场色占比 < 50%
+	for s in range(1, StageCfg.STAGE_N + 1):
+		var want := StageCfg.elite_hue_n(s)
+		for _rep in 24:
+			# 力场色已改为**按出场序号**取（强制异色），不再随机 —— 要让两件战甲色
+			# 都被覆盖到，就得自己轮 seq，否则 24 次全抽到同一色、等于只测了一半
+			var e := _mk_elite(s, armors, _rep % armors.size())
+			if not armors.has(e.color) and f_s.is_empty():
+				f_s = "L%d 抽到 %s" % [s, Game.COLOR_CN[e.color]]
+			if e._hues.size() != want and f_len.is_empty():
+				f_len = "L%d 期望 %d 实测 %d" % [s, want, e._hues.size()]
+			elif e._hues[0] != e.color and f_len.is_empty():
+				f_len = "L%d 色序首位不是力场色（%s）" % [s, str(e._hues)]
+			var seen := {}
+			var n_s := 0    # 色序里 ∈ S 但非力场色的个数
+			var n_c := 0    # 色序里 ∈ S' 的个数
+			for i in e._hues.size():
+				var c: int = e._hues[i]
+				if seen.has(c) and f_dup.is_empty():
+					f_dup = "L%d -> %s" % [s, str(e._hues)]
+				seen[c] = true
+				if i <= 0:
+					continue
+				if armors.has(c):
+					n_s += 1
+					# 玩家的副甲色只在色数 > 1+|S'| 时才够数动用，且**只能补在末尾**
+					if i != e._hues.size() - 1 and f_out.is_empty():
+						f_out = "L%d 第 %d 色 %s ∈ S 却不在末尾（%s）" \
+							% [s, i + 1, Game.COLOR_CN[c], str(e._hues)]
+				else:
+					n_c += 1
+			# 掺色优先用 S'：能用几个用几个，不够数才轮到玩家的副甲色
+			var want_c := mini(want - 1, comp.size())
+			if n_c != want_c and f_out.is_empty():
+				f_out = "L%d 掺了 %d 个 S' 色，应为 %d（%s）" % [s, n_c, want_c, str(e._hues)]
+			if n_s > 1 and f_out.is_empty():
+				f_out = "L%d 混入 %d 个 ∈ S 的非力场色（最多 1 个）" % [s, n_s]
+			# 力场色占比：七向扇射（7 发）与十四向环（14 发）两种齐射都验
+			for total in [7, 14]:
+				var main := 0
+				for i in total:
+					if e._shot_color(i) == e.color:
+						main += 1
+				if main * 2 < total and f_main.is_empty():
+					f_main = "L%d 齐射 %d 发中力场色仅 %d 发" % [s, total, main]
+			e.queue_free()
+	await _frames(3)
+	_ck(f_s.is_empty(), "★ 可行性铁律：战将力场色恒 ∈ 玩家战甲 S" + _bad(f_s))
+	_ck(f_len.is_empty(), "色序长度 = 本关色数，且首位必是力场色" + _bad(f_len))
+	_ck(f_out.is_empty(), "掺色优先用 S'（吸不了，逼走位）；副甲色仅补在末尾（S' = %s）"
+		% _armor_cn(comp) + _bad(f_out))
+	_ck(f_dup.is_empty(), "色序内无重复色" + _bad(f_dup))
+	_ck(f_main.is_empty(), "力场色在齐射中恒占 ≥50%（「为主」的落点）" + _bad(f_main))
+
+	# ---------- 同关多只精英强制「相邻」异色 ----------
+	# 力场色改按出场序号取 S 的第 seq 色。随机抽的话约半数局两只同色 ——
+	# 玩家一件甲打穿两场，「换甲」恰恰在最需要它的那两波上被稀释。
+	# ⚠ 四只精英上线后，同关精英数已不止两只（实测 L2×2 / L3×3 / L4×3 / L5×4），
+	#   而 |S| = 2 —— seq 轮转下第 1、3 只必然同色，**全互异在数学上不可能**。
+	#   这里守的是「相邻两只异色」：换甲的紧迫感来自「下一只换了色」，不是全场不重色。
+	var f_pair := ""
+	var f_pair_s := ""
+	var pair_cn := ""
+	for s in range(1, StageCfg.STAGE_N + 1):
+		var n_e := 0
+		for n in range(1, StageCfg.waves(s) + 1):
+			if StageCfg.wave_elite(s, n):
+				n_e += 1
+		if n_e < 2:
+			continue
+		if not pair_cn.is_empty():
+			pair_cn += " / "
+		pair_cn += "L%d×%d" % [s, n_e]
+		# 采样 30 次：确定性分配每次都必异色；改回随机则 30 次里几乎必有一次撞同色
+		for _rep in 30:
+			var ea := _mk_elite(s, armors, 0)
+			var eb := _mk_elite(s, armors, 1)
+			if not armors.has(ea.color) and f_pair_s.is_empty():
+				f_pair_s = "L%d 第 1 只抽到 %s ∉ S" % [s, Game.COLOR_CN[ea.color]]
+			if not armors.has(eb.color) and f_pair_s.is_empty():
+				f_pair_s = "L%d 第 2 只抽到 %s ∉ S" % [s, Game.COLOR_CN[eb.color]]
+			if ea.color == eb.color and f_pair.is_empty():
+				f_pair = "L%d 两只战将同为 %s" % [s, Game.COLOR_CN[ea.color]]
+			ea.queue_free()
+			eb.queue_free()
+		# 接线：Level 必须真的把递增的序号传下去（只改 Elite 不改 Level，这里就会红）
+		var lv := Level.new()
+		lv.stage = s
+		add_child(lv)
+		lv._running = false
+		await _frames(3)
+		for _k in n_e:
+			lv._spawn_elite(1.0, EnemyKind.E.WARRIOR)
+		await _frames(2)
+		var cs: Array[int] = []
+		for ch in lv.get_children():
+			if ch is Elite:
+				cs.append((ch as Elite).color)
+		if cs.size() != n_e and f_pair.is_empty():
+			f_pair = "L%d 期望 %d 只战将实测 %d" % [s, n_e, cs.size()]
+		# 相邻异色（|S| = 2 时全互异不可能，隔一只同色是设计内的）
+		for i in range(1, cs.size()):
+			if cs[i] == cs[i - 1] and f_pair.is_empty():
+				f_pair = "L%d 第 %d 只与第 %d 只同色（%s）" % [s, i, i + 1, str(cs)]
+		lv.queue_free()
+		await _frames(2)
+	await _frames(3)
+	_ck(f_pair.is_empty(), "同关多只精英强制「相邻」异色（涉及 %s）" % pair_cn + _bad(f_pair))
+	_ck(f_pair_s.is_empty(), "强制异色不改铁律：每只战将力场色仍 ∈ S" + _bad(f_pair_s))
+
+
+# ------------------------------------------------------------ 新精英（堡垒 / 指挥 / 护盾）
+## 2026-09-22 主理人要求「增加精英怪」新增三只。这里守：
+##   ① 三只都能生成、色防色恒 ∈ 玩家战甲 S（可行性铁律，与战将同口径）
+##   ② 弹幕堡垒将：无护罩，任意色都能全额打本体（纯 DPS 检验）
+##   ③ 护盾冲锋将：★ 朝向护盾方向判定 —— 正面（玩家在左）异色打在护盾上、
+##      侧面（玩家上/下）全额打本体。**锁死护盾方向 bug**（曾漏负号导致护盾形同虚设）。
+func _mk_elite_type(st: int, armors: Array[int], etype: int) -> EliteBase:
+	match etype:
+		EnemyKind.E.BASTION:
+			var b := EliteBastion.new()
+			b.stage = st
+			b.world = self
+			add_child(b)
+			b.player_armors = armors
+			b.setup(1.0)
+			return b
+		EnemyKind.E.SWARM:
+			var s2 := EliteSwarm.new()
+			s2.stage = st
+			s2.world = self
+			add_child(s2)
+			s2.player_armors = armors
+			s2.setup(1.0)
+			return s2
+		EnemyKind.E.AEGIS:
+			var a := EliteAegis.new()
+			a.stage = st
+			a.world = self
+			add_child(a)
+			a.player_armors = armors
+			a.setup(1.0)
+			return a
+	return null
+
+
+func _test_elite_new() -> void:
+	print("------ 新精英（堡垒 / 指挥 / 护盾）------")
+	var armors: Array[int] = [Game.RED, Game.WHITE]
+
+	# ---------- ① 可行性铁律：三只色防色恒 ∈ S ----------
+	var f_s := ""
+	for st in range(1, StageCfg.STAGE_N + 1):
+		for et in [EnemyKind.E.BASTION, EnemyKind.E.SWARM, EnemyKind.E.AEGIS]:
+			var e := _mk_elite_type(st, armors, et)
+			if e == null:
+				continue
+			if not armors.has(e.color) and f_s.is_empty():
+				f_s = "L%d %s 色 %s ∉ S" % [st, et, Game.COLOR_CN[e.color]]
+			e.queue_free()
+	_ck(f_s.is_empty(), "★ 可行性铁律：新精英色防色恒 ∈ 玩家战甲 S" + _bad(f_s))
+
+	# ---------- ② 弹幕堡垒将：无护罩，异色也全额打本体 ----------
+	var b := _mk_elite_type(3, armors, EnemyKind.E.BASTION) as EliteBastion
+	if b != null:
+		var off := (b.color + 1) % 4
+		var hp0 := b.hp
+		b.hit(100, off)
+		_ck(hp0 - b.hp == 100, "堡垒将无护罩：异色全额打本体（100 -> 掉 %d）" % (hp0 - b.hp))
+		var hp_after_off := b.hp
+		b.hit(100, b.color)
+		# 堡垒将无护罩：同色走正常 +50%% 加成（100 -> 150），异色全额（100）。
+		# 这里专门确认「同色不叠加任何护盾/护罩逻辑」——就是纯粹的 +50%%。
+		# ⚠ 文案里的 % 必须写成 %%%%（GDScript % 格式化会把裸 % 当格式符，报 String formatting error）。
+		_ck(hp_after_off - b.hp == 150, "堡垒将同色 +50%% 全额（无护罩，不叠加护盾逻辑，掉 %d）" % (hp_after_off - b.hp))
+		b.queue_free()
+
+	# ---------- ③ 护盾冲锋将：朝向护盾方向判定（锁死方向 bug）----------
+	var a := _mk_elite_type(4, armors, EnemyKind.E.AEGIS) as EliteAegis
+	if a != null:
+		a.position = Vector2(600.0, 300.0)
+		a.ward = a.ward_max
+		var w0 := a.ward
+		var h0 := a.hp
+		# 模拟「玩家在正面（左方）」：护盾存续时异色应打在护盾上（本体不掉血）
+		var off := (a.color + 1) % 4
+		a.player_ref = _elite_dummy_player(Vector2(100.0, 300.0))
+		a.hit(100, off)
+		_ck(a.hp == h0, "护盾冲锋将：正面（玩家在左）异色打在护盾上，本体不掉血")
+		_ck(a.ward < w0, "护盾冲锋将：正面异色消耗护盾（ward %d -> %d）" % [w0, a.ward])
+		# 正面同色破盾更快（+50%）
+		var w1 := a.ward
+		a.hit(100, a.color)
+		_ck(a.ward < w1, "护盾冲锋将：正面同色破盾更快（ward %d -> %d）" % [w1, a.ward])
+		# 模拟「玩家在侧面（正上方）」：绕开护盾锥，全额打本体
+		a.ward = a.ward_max
+		var h1 := a.hp
+		a.player_ref = _elite_dummy_player(Vector2(600.0, 100.0))
+		a.hit(100, off)
+		_ck(a.hp < h1, "护盾冲锋将：侧面（玩家上/下）绕开护盾，全额打本体（掉 %d）" % (h1 - a.hp))
+		# 变异闸：正面异色若被误判成绕背，本体就会掉血 —— 这条专门抓「漏负号」回归
+		a.player_ref = _elite_dummy_player(Vector2(100.0, 300.0))
+		a.ward = a.ward_max
+		var h2 := a.hp
+		a.hit(100, off)
+		_ck(a.hp == h2, "护盾冲锋将：正面异色绝不穿透到本体（方向判定回归闸）")
+		a.queue_free()
+
+	# ---------- 指挥将：能生成、色 ∈ S 已在 ① 覆盖；召唤走硬闸，这里只验本体可全额打 ----------
+	var s2 := _mk_elite_type(3, armors, EnemyKind.E.SWARM) as EliteSwarm
+	if s2 != null:
+		var hs0 := s2.hp
+		s2.hit(100, s2.color)
+		_ck(s2.hp < hs0, "指挥将本体可被全额打（无护罩，召唤机制不影响本体受伤）")
+		s2.queue_free()
+
+
+## 造一个孤立的 Player 当「玩家位置参照」—— Aegis 的朝向判定只读 player_ref.position
+func _elite_dummy_player(pos: Vector2) -> Player:
+	var p := Player.new()
+	add_child(p)
+	# ⚠ position 必须在 add_child **之后**设：Player._ready() 会把 position 重置到 (230, 中)。
+	#   若写在 add_child 前，_ready 会覆盖掉，导致 Aegis 朝向判定读到错误来向（2026-09-22 修）。
+	p.position = pos
+	return p
+
+
 # ------------------------------------------------------------ 矢量活体静态检查（07 §2.4）
 ## 覆盖 PirateArt.gd（星盗喽啰 / 星盗战将）与 Boss.gd（星盗旗舰）的矢量渲染路径。
 ## V1 是主通道（舱盖色的有无）的活体保证，最高优先；V0/V2/V3/V4 守其余通道。
+## 配置集中化的回归网 —— **数值只能住在 Cfg 里**。
+## 三条：
+##   ① 实体文件不许再自己定义数值常量（源码级扫描，防有人图省事往回加）；
+##   ② 飘字 / 说明文案由配置现拼（改了 ATK_STEP，文案必须跟着变）；
+##   ③ 同值双源已消除（雷的寿命、每波掉落数各只剩一处）。
+func _test_cfg_source() -> void:
+	print("------ 配置集中 ------")
+	var rules: Array[String] = [
+		"res://scripts/entities/Player.gd|const MAX_HP",
+		"res://scripts/entities/Player.gd|const ATK_STEP",
+		"res://scripts/entities/Player.gd|const HEAT_MAX",
+		"res://scripts/entities/Pickup.gd|const LIFE",
+		"res://scripts/entities/Pickup.gd|const WEIGHT",
+		"res://scripts/entities/Elite.gd|const BASE_HP",
+		"res://scripts/entities/Elite.gd|const WARD_HP",
+		"res://scripts/entities/EnemyBrain.gd|const MARTYR_DMG",
+		"res://scripts/entities/EnemyBrain.gd|const DEFECTOR_SWAP",
+		"res://scripts/entities/BossMine.gd|const LIFE",
+		"res://scripts/entities/Boss.gd|const HEAT_BLAST_DMG",
+		"res://scripts/world/Level.gd|const WAVE_DROP",
+		"res://scripts/world/Level.gd|const MAX_RUN",
+	]
+	var f_def := ""
+	for r in rules:
+		var parts := r.split("|")
+		var src := _read(parts[0])
+		if src.is_empty():
+			if f_def.is_empty():
+				f_def = "读不到 " + parts[0]
+			continue
+		if src.contains(parts[1]) and f_def.is_empty():
+			f_def = "%s 仍定义「%s」—— 数值应迁到 Cfg" % [parts[0].get_file(), parts[1]]
+	_ck(f_def.is_empty(), "实体文件不再自带数值常量（PlayerCfg / PickupCfg / EnemyCfg 是唯一来源）"
+		+ _bad(f_def))
+
+	# ② 文案由配置派生：改了配置，飘字与说明必须同时跟着变
+	var tip_atk := PickupCfg.tip(Pickup.T.ATK)
+	_ck(tip_atk == "攻击 +%d%%" % int(roundf(PlayerCfg.ATK_STEP * 100.0)),
+		"增幅核心飘字由配置派生（实测「%s」）" % tip_atk)
+	_ck(PickupCfg.tip(Pickup.T.HEAL) == "生命 +%d" % PlayerCfg.HEAL_AMOUNT, "修复包飘字同源")
+	# 手册要守的是「**调用了 tip()**」这个事实，而不是拼出来的字符串 ——
+	# 只比字符串的话，写死一个当前同值的文案照样绿。
+	var help_src := _read("res://scripts/ui/HelpScreen.gd")
+	_ck(help_src.contains("PickupCfg.tip(Pickup.T.ATK)"),
+		"作战手册的道具条目由 PickupCfg.tip 现拼（不写死数值）")
+	var help_line := ""
+	for sec in HelpScreen._build_sections():
+		var lines: Array = sec["l"]
+		for line in lines:
+			var s := str(line)
+			if s.contains("增幅核心"):
+				help_line = s
+	_ck(help_line.contains(tip_atk),
+		"作战手册实测条目与配置一致（「%s」）" % help_line)
+
+	# ③ 双源已消除
+	_ck(is_equal_approx(EnemyCfg.MINE_LIFE, 8.0)
+		and not _read("res://scripts/entities/EnemyBrain.gd").contains("LAYER_MINE_LIFE"),
+		"雷的寿命单一来源（EnemyCfg.MINE_LIFE = %.0f 秒）" % EnemyCfg.MINE_LIFE)
+	_ck(StageCfg.wave_drop(1) == 1
+		and not _read("res://scripts/world/Level.gd").contains("WAVE_DROP"),
+		"每波刷新道具数单一来源（StageCfg.wave_drop）")
+
+
 func _read(path: String) -> String:
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
@@ -925,7 +1340,7 @@ func _minion_budget() -> bool:
 	return true
 
 
-## V4-b：星盗战将 draw_elite 内所有顶点 / 矩形角点半径 ≤ 40（法罡弧内缘 43 留 3px）。
+## V4-b：星盗战将 draw_elite 内所有顶点 / 矩形角点半径 ≤ 40（力场弧内缘 43 留 3px）。
 func _elite_budget(body: String) -> bool:
 	var vmax := 0.0
 	var re_v := RegEx.new()
@@ -1029,9 +1444,162 @@ func _test_vector_static() -> void:
 	_ck(_cores_left(pa), "V2 星盗喽啰 / 战将 CORE 锚点全在 −X（朝向指针）")
 	# V4 体量：剪影预算
 	_ck(_minion_budget(), "V4 星盗喽啰主体 r ≤ 22（碰撞 19 擦弹余量）")
-	_ck(_elite_budget(delite), "V4 星盗战将 r ≤ 40（法罡弧内缘 43 留 3px）")
+	_ck(_elite_budget(delite), "V4 星盗战将 r ≤ 40（力场弧内缘 43 留 3px）")
 	# V3 顶层轮廓：顶带双分离
 	_ck(_elite_top_separation(delite), "V3 战将顶带探针行 y=−30 双分离（2 段 · gap ≥ 20）")
+	# V5 逐关擦弹余量（07 §1.8 v4，Boss 五关专用）：单位剪影最远角半径 × R_MAIN / R_HIT ≤ 1.34
+	_ck(_boss_clearance_ratio(bossart),
+		"V5 Boss 五关擦弹余量比 ≤ 1.34（最远角 × R_MAIN ÷ R_HIT）")
+	# V5b 屏幕安全：器官外缘 ≤ 295px（Boss 常驻 x=985，右缘不越 1280）
+	_ck(_boss_screen_safe(bossart),
+		"V5b Boss 器官外缘 ≤ 295px（常驻 x=985 不越屏右 1280）")
+	# V6 节点比例化（07 §1.8 v4）：反应堆节点不得写死 17.0/11.0，须走 rr_big/rr_small
+	_ck(boss.contains("rr_big") and boss.contains("rr_small"),
+		"V6 Boss 反应堆节点已比例化（rr_big / rr_small 存在）")
+	_ck(not (boss.contains("17.0 if i == ward") or boss.contains("17.0 if i==ward")),
+		"V6 Boss 反应堆节点无写死 17.0/11.0")
+	# V7 外挂件贴装（07 §2.4，L3 炮垒专用）：bx / 炮塔间距 / 装甲带必须跟着 SIL_BATTERY 联动，
+	#   否则动剪影忘挂件就画断件（炮塔悬空、炮塔出舷、装甲带越界）。三条判据一次算清。
+	_ck(_boss_attachments(bossart),
+		"V7 L3 炮垒外挂件贴装（bx=−X顶点 / 炮塔不出舷 / 装甲带内缩不越界）")
+
+
+## V5：Boss 五关擦弹余量比。取每关单位剪影（SIL_*）的最远角半径，
+##   × StageCfg.boss_r_main(s) ÷ StageCfg.boss_r_hit(s)，五关各算一次，一律 ≤ 1.34。
+##   剪影是「单位半径 1 = R_MAIN」，运行时乘 r，故最远角半径 = max(length(v)) × R_MAIN。
+##   ⚠ 口径：V5 量的是 SIL_* **本体多边形**（顶点外接半径），**不含** draw_body 外那层
+##     r×1.06~1.07 的暗色描边（`draw_colored_polygon(_poly(SIL_*, r*1.06), dk)`）——
+##     描边才是玩家看到的真正外缘，含描边实际视觉死区约再大 6~7%（L3 修完约 1.28）。
+##     五关口径一致（都只算本体），1.28 仍在 1.34 以内，故先不改口径；后来人勿误读成含描边。
+##   L3 SIL_BATTERY 已等比缩 ×0.8285（team-lead 终裁坐标），收角后余量比 ≈1.206，全五关通过。
+func _boss_clearance_ratio(bossart: String) -> bool:
+	# 五关顺序对应 SIL_ 与逐关标量（与 StageCfg 下标 0=第1关 一致）
+	var sil_names := ["SIL_CORE", "SIL_WING", "SIL_BATTERY", "SIL_MAW", "SIL_THRONE"]
+	var r_main := [56.0, 63.0, 70.0, 77.0, 84.0]
+	var r_hit := [46.0, 52.0, 58.0, 65.0, 70.0]
+	const LIMIT := 1.34
+	var worst := 0.0
+	var worst_s := -1
+	for s in 5:
+		var rmax := _sil_max_radius(bossart, sil_names[s])
+		if rmax <= 0.0:
+			return false   # 剪影没解析到 → 视为失败
+		var ratio: float = rmax * r_main[s] / r_hit[s]
+		if ratio > worst:
+			worst = ratio
+			worst_s = s   # 只在刷新最大值时更新，避免循环结束恒等于 4
+		if ratio > LIMIT:
+			return false
+	print("    [V5] 最紧关 L%d 余量比 = %.3f（≤ %.2f）" % [worst_s + 1, worst, LIMIT])
+	return true
+
+
+## V5b：屏幕安全。取每关单位剪影的最大 +X 外突（×1.07 描边外缘），
+##   × R_MAIN 必须 ≤ 295px（Boss 常驻 x=985，右缘 985+295=1280=VIEW_W）。
+func _boss_screen_safe(bossart: String) -> bool:
+	var sil_names := ["SIL_CORE", "SIL_WING", "SIL_BATTERY", "SIL_MAW", "SIL_THRONE"]
+	var r_main := [56.0, 63.0, 70.0, 77.0, 84.0]
+	const MAX_OUT := 295.0
+	for s in 5:
+		var maxx := _sil_max_x(bossart, sil_names[s])
+		if maxx <= 0.0:
+			return false
+		# ×1.07 = draw_body 描边外缘（BossArt 里 _poly(SIL_*, r*1.06/1.07)）
+		var out: float = maxx * r_main[s] * 1.07
+		if out > MAX_OUT:
+			return false
+	return true
+
+
+## 解析 BossArt 里 `const SIL_NAME := [ Vector2(...), ... ]` 的最远角半径（顶点长度最大值）。
+func _sil_max_radius(text: String, name: String) -> float:
+	var re := RegEx.new()
+	re.compile("const\\s+" + name + "\\s*:=\\s*\\[([^\\]]+)\\]")
+	var m := re.search(text)
+	if m == null:
+		return 0.0
+	var vmax := 0.0
+	for v in _parse_vec2_array(m.get_string(1)):
+		vmax = maxf(vmax, v.length())
+	return vmax
+
+
+## 同上，但取最大 +X 外突（x 分量最大值），供 V5b 屏幕安全用。
+func _sil_max_x(text: String, name: String) -> float:
+	var re := RegEx.new()
+	re.compile("const\\s+" + name + "\\s*:=\\s*\\[([^\\]]+)\\]")
+	var m := re.search(text)
+	if m == null:
+		return 0.0
+	var maxx := 0.0
+	for v in _parse_vec2_array(m.get_string(1)):
+		maxx = maxf(maxx, v.x)
+	return maxx
+
+
+## V7：L3 炮垒外挂件贴装检查（07 §2.4）。bx / 炮塔间距 / 装甲带三处挂件必须跟着
+##   SIL_BATTERY 联动 —— 动剪影忘挂件就画断件（炮塔悬空、炮塔出舷、装甲带越界）。
+##   bx / off / 装甲带都是函数局部变量，拿不到常量，只能源码文本扫描（_func_body 够用）。
+##   三条判据：
+##     ① _turret 的 bx 系数 = SIL_BATTERY 的 −X 顶点 x（贴装面不悬空）
+##     ② 炮塔间距 (base+step·(n/2−1))+0.055 ≤ 舷半高（−X 顶点 |y|），按 n=4/6/8 三档各算
+##     ③ 装甲带 x0 > −X 顶点 x（内缩）且右端 x0+w < 舰体右界（max x）
+func _boss_attachments(bossart: String) -> bool:
+	# 解析 SIL_BATTERY 的 −X 顶点 x（最小 x）、右界（最大 x）、−X 顶点 |y|（舷半高）
+	var re_sil := RegEx.new()
+	re_sil.compile("const\\s+SIL_BATTERY\\s*:=\\s*\\[([^\\]]+)\\]")
+	var ms := re_sil.search(bossart)
+	if ms == null:
+		return false
+	var minx := 0.0
+	var maxx := 0.0
+	var half_h := 0.0
+	var first := true
+	for v in _parse_vec2_array(ms.get_string(1)):
+		if first:
+			minx = v.x
+			maxx = v.x
+			first = false
+		minx = minf(minx, v.x)
+		maxx = maxf(maxx, v.x)
+		if absf(v.x - minx) < 0.001:
+			half_h = maxf(half_h, absf(v.y))   # −X 顶点 |y| = 舷半高
+	# ① _turret 的 bx 系数必须 = −X 顶点 x
+	var bt := _func_body(bossart, "_turret")
+	var re_bx := RegEx.new()
+	re_bx.compile("bx\\s*:=\\s*(-?[0-9.]+)\\s*\\*\\s*r")
+	var mb := re_bx.search(bt)
+	if mb == null:
+		return false
+	if absf(float(mb.get_string(1)) - minx) > 0.001:
+		return false
+	# ② _l3_guns 炮塔间距：按 n=4/6/8 三档，(base+step·(n/2−1))+0.055 ≤ 舷半高
+	var bl := _func_body(bossart, "_l3_guns")
+	var re_off := RegEx.new()
+	re_off.compile("\\(\\s*([0-9.]+)\\s*\\+\\s*([0-9.]+)\\s*\\*\\s*float\\(j\\)\\s*\\)")
+	var mo := re_off.search(bl)
+	if mo == null:
+		return false
+	var base := float(mo.get_string(1))
+	var step := float(mo.get_string(2))
+	for n in [4, 6, 8]:
+		var tip: float = base + step * float(n / 2 - 1) + 0.055
+		if tip > half_h + 0.001:
+			return false
+	# ③ 装甲带：x0 > −X 顶点 x（内缩）且右端 x0+w < 舰体右界
+	var bd := _func_body(bossart, "draw_battery")
+	var re_arm := RegEx.new()
+	re_arm.compile("Rect2\\(\\s*(-?[0-9.]+)\\s*\\*\\s*r\\s*,\\s*yy\\s*,\\s*([0-9.]+)\\s*\\*\\s*r")
+	var ma := re_arm.search(bd)
+	if ma == null:
+		return false
+	var x0 := float(ma.get_string(1))
+	var w := float(ma.get_string(2))
+	if x0 <= minx:        # 必须内缩（x0 在 −X 顶点内侧，更不负）
+		return false
+	if x0 + w > maxx:     # 右端不越舰体右界
+		return false
+	return true
 
 
 # ------------------------------------------------------------ 术语红线
@@ -1039,7 +1607,7 @@ func _test_vector_static() -> void:
 ## 注：禁用词用**拼接**书写 —— 否则本文件自己就会命中自己。
 ##
 ## ⚠ 已知的「合法同形词」，别照关键词结果误删：
-##   · `StageSelect._phase_cn()` 返回「三重」= **Boss 阶段数**，与关卡数无关
+##   · `StageSelect._phase_cn()` 返回「三阶段」= **Boss 阶段数**，与关卡数无关
 ##   · `Level.gd` 顶部与 `_wave_colors` 注释里的「三波」= L1 确实只有 3 波
 ##   · `StageCfg` / `Game` 注释里的「三档」= 品阶三档 / 旧难度三档，都是史实陈述
 ## 判断口径：**关卡数**一律以 `StageCfg.STAGE_N`（= 5）为准；
@@ -1149,7 +1717,7 @@ func _test_level() -> void:
 	await _frames(3)
 
 	# _enemy_count 是「全场计数」（不做视野过滤）：必须能看到 hover 骚扰敌飞出右边界
-	# 后的自我回收，否则每重都会白等清场上限。这里跑一遍真实离场流程验证计数归零。
+	# 后的自我回收，否则每波都会白等清场上限。这里跑一遍真实离场流程验证计数归零。
 	var lv2 := Level.new()
 	add_child(lv2)
 	await _frames(3)
@@ -1244,14 +1812,14 @@ func _test_wave_colors() -> void:
 				if w1.size() != 5 or w2.size() != 7 or w3.size() != 8:
 					if f_cnt.is_empty():
 						f_cnt = cn
-				# 第 1 重：5 只全 = 第二件战甲色
+				# 第 1 波：5 只全 = 第二件战甲色
 				var ok1 := true
 				for c in w1:
 					if c != b:
 						ok1 = false
 				if not ok1 and f_w1.is_empty():
 					f_w1 = cn
-				# 第 2 重：目标色严格交替 + 骚扰色 2 只
+				# 第 2 波：目标色严格交替 + 骚扰色 2 只
 				var tgt2: Array[int] = []
 				var n_h2 := 0
 				for c in w2:
@@ -1263,7 +1831,7 @@ func _test_wave_colors() -> void:
 					f_w2 = cn
 				if not _strict_alt(tgt2, a, b) and f_alt.is_empty():
 					f_alt = cn + " -> " + str(tgt2)
-				# 第 3 重：骚扰色 3 只，且必须是第 2 重没用过的那一色
+				# 第 3 波：骚扰色 3 只，且必须是第 2 波没用过的那一色
 				var n_h3 := 0
 				var n_h2_in_w3 := 0
 				for c in w3:
@@ -1273,8 +1841,8 @@ func _test_wave_colors() -> void:
 						n_h2_in_w3 += 1
 				if (n_h3 != 3 or n_h2_in_w3 != 0) and f_w3.is_empty():
 					f_w3 = cn
-				# 连长：第 2 / 3 重不许出现连续 ≥3 同色
-				#（第 1 重是刻意的一色到底 —— 教换甲的教学重，不在约束内）
+				# 连长：第 2 / 3 波不许出现连续 ≥3 同色
+				#（第 1 波是刻意的一色到底 —— 教换甲的教学波，不在约束内）
 				if Level._max_run(w2) > 2 or Level._max_run(w3) > 2:
 					if f_run.is_empty():
 						f_run = cn
@@ -1289,11 +1857,11 @@ func _test_wave_colors() -> void:
 				if seen.size() != 4 and f_union.is_empty():
 					f_union = "%s -> %d 色" % [cn, seen.size()]
 	_ck(f_cnt.is_empty(), "六种组合：只数 5 / 7 / 8 合计 20（分数基数不变）" + _bad(f_cnt))
-	_ck(f_w1.is_empty(), "六种组合：第 1 重 5 只全为第二件战甲色" + _bad(f_w1))
-	_ck(f_alt.is_empty(), "六种组合：第 2 重目标色严格交替" + _bad(f_alt))
-	_ck(f_w2.is_empty(), "六种组合：第 2 重骚扰色 2 只" + _bad(f_w2))
-	_ck(f_w3.is_empty(), "六种组合：第 3 重骚扰色 3 只且换色（≠ 第 2 重）" + _bad(f_w3))
-	_ck(f_run.is_empty(), "六种组合：第 2 / 3 重无连续 ≥3 同色" + _bad(f_run))
+	_ck(f_w1.is_empty(), "六种组合：第 1 波 5 只全为第二件战甲色" + _bad(f_w1))
+	_ck(f_alt.is_empty(), "六种组合：第 2 波目标色严格交替" + _bad(f_alt))
+	_ck(f_w2.is_empty(), "六种组合：第 2 波骚扰色 2 只" + _bad(f_w2))
+	_ck(f_w3.is_empty(), "六种组合：第 3 波骚扰色 3 只且换色（≠ 第 2 波）" + _bad(f_w3))
+	_ck(f_run.is_empty(), "六种组合：第 2 / 3 波无连续 ≥3 同色" + _bad(f_run))
 	_ck(f_union.is_empty(), "六种组合：三波敌色并集 = 全 4 色" + _bad(f_union))
 
 	# ---------- 骚扰色恒 hover ----------
@@ -1305,7 +1873,7 @@ func _test_wave_colors() -> void:
 	lv._plan_harass()
 	var h2v: int = lv._harass[0]
 	var h3v: int = lv._harass[1]
-	_ck(h2v != h3v, "两重骚扰色不同（%s / %s）" % [Game.COLOR_CN[h2v], Game.COLOR_CN[h3v]])
+	_ck(h2v != h3v, "两波骚扰色不同（%s / %s）" % [Game.COLOR_CN[h2v], Game.COLOR_CN[h3v]])
 	_ck(h2v != Game.RED and h2v != Game.WHITE, "骚扰色 ∈ S'（玩家永远免疫不了）")
 	var pats: Array[String] = ["straight", "sine", "dive"]
 	lv._spawn_enemy(1.0, h2v, h2v, pats)
@@ -1333,13 +1901,13 @@ func _test_wave_colors() -> void:
 	await _frames(3)
 
 	# ---------- 递进参数 ----------
-	_ck(not Level._wave_moves(1).has("dive"), "第 1 重不出 dive（开局不俯冲）")
-	_ck(Level._wave_moves(3).has("dive"), "第 3 重含 dive")
+	_ck(not Level._wave_moves(1).has("dive"), "第 1 波不出 dive（开局不俯冲）")
+	_ck(Level._wave_moves(3).has("dive"), "第 3 波含 dive")
 	# 出怪间隔一律从 StageCfg 推导 —— 写死 0.62 / 0.55 / 0.50 这类数字，
 	# 下次改配置又会红，那是自己在制造「静默过时的用例」。
 	for n in range(1, StageCfg.waves(1) + 1):
 		_ck(is_equal_approx(Level._wave_gap(n), StageCfg.wave_gap(1, n)),
-			"第 %d 重出怪间隔与 StageCfg 一致（%.2f）" % [n, Level._wave_gap(n)])
+			"第 %d 波出怪间隔与 StageCfg 一致（%.2f）" % [n, Level._wave_gap(n)])
 	# 递进语义：越往后越密（这条才是真正要守的不变量）
 	_ck(Level._wave_gap(1) > Level._wave_gap(2) and Level._wave_gap(2) > Level._wave_gap(3),
 		"出怪间隔逐波收紧（%.2f > %.2f > %.2f）"
@@ -1378,7 +1946,7 @@ func _test_boss() -> void:
 	for i in 1400:
 		if i % 45 == 0 and lv.player != null and is_instance_valid(lv.player):
 			lv.player.do_swap()
-			lv.player.hp = Player.MAX_HP
+			lv.player.hp = PlayerCfg.MAX_HP
 		if not is_instance_valid(b):
 			break
 		seen[b.phase] = true
@@ -1406,6 +1974,220 @@ func _test_boss() -> void:
 		"Boss 护罩色恒 ∈ 玩家战甲（R-02 回归，越界 %d / %d 次）" % [ward_bad, ward_seen])
 	_ck(lv.player != null and is_instance_valid(lv.player), "玩家在 Boss 战中存活")
 	lv.queue_free()
+	await _frames(3)
+
+
+## L3 耀斑号【散热期】专项（2026-09-22 新增，配合 L3 难度断崖修复）
+##
+## ⚠⚠ **不要把这类断言写进 `MatrixProbe.gd`** —— 那是**独立场景**，而门禁跑的
+##   `SelfTest.tscn` **并不加载它**，写在里面的断言一次都不会执行。2026-09-22 实踩：
+##   先在 MatrixProbe 里改了散热倍率断言并新增一条「阶段切换不得硬编码 P1 窗口」
+##   的元断言，跑门禁 fails=0；做变异测试把实现改回旧值，门禁**仍是 fails=0** ——
+##   不是断言不敏感，是它压根没跑。门禁的唯一入口是本文件的 `_ready()` 调用链，
+##   **断言必须落在本文件**。
+##
+## 覆盖两件事（都是 2026-09-22 L3 曲线断崖修复的落点）：
+##   ① 倍率：常态 ×0.3（常驻减伤 70%）/ 散热期 ×1.8 / 狂暴 ×2.4（原 ×3.0 / ×4.0）
+##   ② 阶段切换白送的散热窗口**按新阶段给**（P2 2.2s / P3 1.6s），不得恒取 P1 的
+##      3.0s —— 那是断崖的第二根因（两次切换各 3.0s，按旧倍率约 1710 点白送，
+##      超过 3200 总血的一半）。
+func _test_l3_vent() -> void:
+	print("------ L3 散热期 ------")
+	# 配置层：不依赖战斗流程，最稳
+	_ck(absf(StageCfg.heat_mul(3, false) - 1.8) < 0.001, "L3 散热倍率 = ×1.8")
+	_ck(absf(StageCfg.heat_mul(3, true) - 2.4) < 0.001, "L3 狂暴散热倍率 = ×2.4")
+	_ck(absf(StageCfg.resident_resist(3) - 0.70) < 0.001, "L3 常驻减伤 70%")
+	_ck(StageCfg.heat_mul(1, false) == 1.0 and StageCfg.heat_mul(5, false) == 1.0,
+		"非 L3 的散热倍率为 1.0（本次下调不波及 L1 / L2 / L4 / L5）")
+
+	Game.current_stage = 3
+	Game.picked_armors = [Game.RED, Game.BLUE]
+	var lv := Level.new()
+	add_child(lv)
+	await _frames(3)
+	lv._running = false
+	await _frames(3)
+	lv._running = true
+	lv.stage = 3
+	lv._boss_fight()
+	var b := lv.boss
+	# Boss 有 enter 进场动画，且不能靠数帧折算游戏时间（headless 帧率抖动极大）
+	for _i in 400:
+		if b != null and is_instance_valid(b) and b._st == "fight":
+			break
+		await get_tree().process_frame
+	if b == null or not is_instance_valid(b):
+		_ck(false, "L3 Boss 生成失败")
+		lv.queue_free()
+		return
+	_ck(b.ward < 0, "L3 全程不展属性护罩（减伤是常驻的、无色的）")
+
+	# 常态：100 → 落 30
+	var hp0 := b.hp
+	b.hit(100, Game.RED)
+	_ck(hp0 - b.hp == 30, "常态 100 伤害 → 落 30（常驻减伤 70%）")
+
+	# 散热期：100 → 落 180（净 ×1.8），且**不叠共振**（同色 / 异色必须一致）
+	b._enter_heat(StageCfg.heat_window(3, 1))
+	_ck(b.venting, "散热期：venting 置位（舱盖打开）")
+	var hp_a := b.hp
+	b.hit(100, Game.RED)
+	var d_red := hp_a - b.hp
+	var hp_b := b.hp
+	b.hit(100, Game.BLUE)
+	var d_blue := hp_b - b.hp
+	_ck(d_red == 180, "散热期 100 伤害 → 落 180（净 ×1.8，常驻减伤解除）")
+	_ck(d_red == d_blue,
+		"散热期不叠共振：同色 %d / 异色 %d 必须相等" % [d_red, d_blue])
+
+	# 阶段切换白送的窗口：按新阶段给，**不**恒取 P1 的 3.0s
+	b.venting = false
+	b._heat_t = 0.0
+	b.phase = 2
+	b._on_phase()
+	_ck(absf(b._heat_t - 2.2) < 0.001,
+		"切 P2：白送散热 = P2 窗口 2.2s（恒为 3.0s 即回归 L3 断崖）")
+	b.venting = false
+	b._heat_t = 0.0
+	b.phase = 3
+	b._on_phase()
+	_ck(absf(b._heat_t - 1.6) < 0.001, "切 P3：白送散热 = P3 窗口 1.6s")
+
+	lv.queue_free()
+	await _frames(3)
+
+
+# ------------------------------------------------------------ 驻留阵地波
+## ⚠ 这类回归断言**必须写在本文件**（门禁跑的是 `SelfTest.tscn`）。
+##   `MatrixProbe.tscn` / `PaceProbe.tscn` / `WardDiag.tscn` 都是手动跑的独立场景，
+##   写在那里的断言一次都不会执行 —— 2026-09-22 的变异测试已经证实过一次。
+##
+## 覆盖「驻留阵地波」（提案 `design/levels/03-关卡节奏实测与驻留波提案.md` §3）：
+##   ① 位表：每关 1~2 波、不碰第 1 波（那是教学波）
+##   ② 背景：驻留期降到 `Background.SCROLL_HOLD`，波结束恢复 `SCROLL_NORMAL`
+##   ③ 入场：驻留波敌人**屏内跃迁**（x ∈ 55%~95% 视宽），列阵者整组共用同一个 x
+##   ④ 零回归：默认（warp_x < 0）仍是右侧屏外飞入，七种独有怪逐一验过
+func _test_hold_wave() -> void:
+	print("------ 驻留阵地波 ------")
+
+	# ---------- ① 位表 ----------
+	var f_w1 := ""
+	var f_too_few := ""
+	var f_too_many := ""
+	var hold_cn := ""
+	for s in StageCfg.STAGE_N:
+		var st := s + 1
+		if StageCfg.wave_hold(st, 1) and f_w1.is_empty():
+			f_w1 = "第 %d 关" % st
+		var k := 0
+		# ⚠ 波号是 1-based：`for n in waves(st)` 是 0..N-1，会漏掉最后一波
+		#   （L4 的第 5 波就是这么被漏掉的 —— 打印出「L4:1」才抓到）
+		for n in range(1, StageCfg.waves(st) + 1):
+			if StageCfg.wave_hold(st, n):
+				k += 1
+				hold_cn += "L%d-%d " % [st, n]
+		if k <= 0 and f_too_few.is_empty():
+			f_too_few = "第 %d 关" % st
+		if k > 2 and f_too_many.is_empty():
+			f_too_many = "第 %d 关（%d 波）" % [st, k]
+	_ck(f_w1.is_empty(), "第 1 波永不驻留（教学波必须保持推进形态）" + _bad(f_w1))
+	_ck(f_too_few.is_empty(), "每关至少一波驻留（%s）" % hold_cn + _bad(f_too_few))
+	_ck(f_too_many.is_empty(), "每关至多两波驻留（别把关卡整段停住）" + _bad(f_too_many))
+
+	# ---------- ② 滚速三档 ----------
+	_ck(Background.SCROLL_HOLD < Background.SCROLL_BOSS
+			and Background.SCROLL_BOSS < Background.SCROLL_NORMAL,
+		"滚速三档有序：驻留 %.0f < Boss %.0f < 推进 %.0f"
+			% [Background.SCROLL_HOLD, Background.SCROLL_BOSS, Background.SCROLL_NORMAL])
+	_ck(Background.SCROLL_HOLD > 0.0,
+		"驻留波不降成硬 0（画面整个停住会看着像卡死）")
+
+	# ---------- ③ 实战：L2 第 3 波是驻留波 ----------
+	Game.current_stage = 2
+	Game.picked_armors = [Game.RED, Game.WHITE]
+	_ck(StageCfg.wave_hold(2, 3), "前哨：L2 第 3 波确为驻留波（换表就要改这条）")
+	var lv := Level.new()
+	lv.stage = 2                 # ★ add_child 之前注入（_ready 里就 _start）
+	add_child(lv)
+	lv._running = false          # 掐断 _ready 里那条 _run 链，免得跟手动跑的波次抢场
+	Engine.time_scale = 8.0
+	await _frames(30)            # 等它自然退出（首个 wait 是 0.9s）
+	Engine.time_scale = 1.0
+	lv._running = true
+	# 不 await：协程同步跑到第一个 await（首只出怪后）即挂起，此刻滚速已切好
+	lv._wave(3, StageCfg.wave_hp_scale(2, 3), false)
+	_ck(is_equal_approx(lv.bg.scroll_speed, Background.SCROLL_HOLD),
+		"驻留波期间背景降到 SCROLL_HOLD（实测 %.0f）" % lv.bg.scroll_speed)
+	_ck(lv.wave_text.find("驻留") >= 0,
+		"驻留波 HUD 波次文字标「驻留」（实测「%s」）" % lv.wave_text)
+	var in_n := 0
+	var out_n := 0
+	for ch in lv.get_children():
+		if ch is Enemy:
+			if (ch as Enemy).position.x < Game.VIEW_W:
+				in_n += 1
+			else:
+				out_n += 1
+	_ck(in_n >= 1 and out_n == 0,
+		"驻留波：敌人跃迁落在屏内（屏内 %d / 屏外 %d）" % [in_n, out_n])
+
+	# 清完场 -> 背景恢复推进速度（清场判定与推进波完全同一段，这里顺带验它仍生效）
+	Engine.time_scale = 8.0
+	var restored := false
+	for _i in 400:
+		for ch2 in lv.get_children():
+			if ch2 is Enemy:
+				(ch2 as Enemy).queue_free()
+		await get_tree().process_frame
+		if is_equal_approx(lv.bg.scroll_speed, Background.SCROLL_NORMAL):
+			restored = true
+			break
+	Engine.time_scale = 1.0
+	_ck(restored, "驻留波清场后背景恢复 SCROLL_NORMAL（实测 %.0f）" % lv.bg.scroll_speed)
+	lv.queue_free()
+	await _frames(3)
+
+	# ---------- ④ 跃迁几何 + 零回归 ----------
+	var lv2 := Level.new()
+	lv2.stage = 4                # L4 有列阵者之外的两种独有怪；列阵者属 L3，手搓指定即可
+	add_child(lv2)
+	lv2._running = false
+	await _frames(3)
+	var pats: Array[String] = ["straight", "sine", "dive"]
+
+	# 列阵者 1 格 = 3 艘成竖墙：整组必须共用同一个跃迁 x，否则墙就散了
+	lv2._spawn_slot(1.0, Game.RED, EnemyKind.K.PHALANX, -1, pats, true)
+	var wall: Array[float] = []
+	for ch3 in lv2.get_children():
+		if ch3 is Enemy:
+			wall.append((ch3 as Enemy).position.x)
+	_ck(wall.size() == 3, "列阵者仍是 3 艘成墙（实测 %d 艘）" % wall.size())
+	var same_x := wall.size() == 3
+	for x in wall:
+		if not is_equal_approx(x, wall[0]) or x < Game.VIEW_W * 0.55 \
+				or x > Game.VIEW_W * 0.95:
+			same_x = false
+	_ck(same_x, "列阵组整组共用同一个跃迁 x（实测 %s）" % str(wall))
+	for ch4 in lv2.get_children():
+		if ch4 is Enemy:
+			(ch4 as Enemy).queue_free()
+	await _frames(3)
+
+	# 零回归：默认（warp_x < 0）仍是右侧屏外飞入 —— 七种独有怪逐一验过
+	var off_n := 0
+	var all_n := 0
+	for s2 in StageCfg.STAGE_N:
+		for k in StageCfg.unique_kinds(s2 + 1):
+			var e := Spawner.enemy(lv2, k, Game.RED, "straight", 300.0, 1.0, s2 + 1)
+			if e == null:
+				continue
+			all_n += 1
+			if e.position.x > Game.VIEW_W:
+				off_n += 1
+			e.queue_free()
+	_ck(all_n == 7 and off_n == 7,
+		"七种独有怪默认仍从右侧屏外飞入（%d/%d）" % [off_n, all_n])
+	lv2.queue_free()
 	await _frames(3)
 
 

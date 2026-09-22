@@ -83,8 +83,14 @@ func _process(delta: float) -> void:
 
 func _ready() -> void:
 	await _frames(2)
+	# ⚠ 固定随机种子 —— Boss 的护罩轮转间隔（3.2 + randf()*1.6）与护罩配色
+	#   （player_armors[randi() % n]）都是随机的，「不换甲」那一档对序列极其敏感：
+	#   实测同一份代码两次运行，L1 不换甲能差出 19.6 s vs 16.9 s（16%）。
+	#   不固定种子的话，跨运行的数字没法比，改一个常量后看到的变化说不清是改动
+	#   还是运气。固定后每次跑出同一组数，才谈得上「A/B 对比」。
+	seed(20260922)
 	Engine.time_scale = TIME_SCALE
-	print("[PACE] ---------- 五关 Boss TTK 实测（理想输出下界，模拟 %d 倍速）" % int(TIME_SCALE))
+	print("[PACE] ---------- 五关 Boss TTK 实测（理想输出下界，模拟 %d 倍速，固定种子）" % int(TIME_SCALE))
 	# 策略 A：完美换甲，两档 DPS
 	for s in 5:
 		await _measure(s + 1, true, DPS_A)

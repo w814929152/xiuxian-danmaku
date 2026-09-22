@@ -21,6 +21,17 @@ enum K {
 	PHASER = 7,       # ⑦ 相位者 · 折跃刺客（L5）每 2.6s 无敌 1.1s + 折跃到玩家脸上
 }
 
+## 精英怪（星盗战将及其同侪）—— 与上面 8 种「喽啰/独有怪」是**两套体系**。
+## 精英不走波次配色格（不占 target/harass 配额），由 Level 的 `_spawn_elite` 按
+## `StageCfg.wave_elite_type` 分派到具体子类（Elite / EliteBastion / EliteSwarm / EliteAegis）。
+## 这里只登记「种类号 → 中文头衔」供横幅与自测用；机制数值在各子类常量里。
+enum E {
+	WARRIOR = 0,      # 星盗战将（既有 Elite）：属性力场 2 层，破罩虚弱，可重铸 1 次
+	BASTION = 1,      # 弹幕堡垒将：缓慢逼近的移动炮台，高密度弹幕墙，血厚无护罩
+	SWARM = 2,        # 增殖指挥将：周期性召唤同色喽啰增援（有硬闸上限），本体躲召唤物后
+	AEGIS = 3,        # 护盾冲锋将：正面朝向护盾免疫全额，绕到侧/后方的异色光刃才打得穿
+}
+
 ## 占哪种色的配额
 enum Q {
 	NONE = 0,
@@ -67,6 +78,22 @@ const STAGE_OF := [0, 1, 2, 3, 4, 4, 5, 5]
 const SHARD_SCORE := 50
 ## ④ 敷设者布下的雷：不给分（否则玩家会为了分去刷雷，与「空间管理」的设计意图相反）
 const MINE_SCORE := 0
+
+## 精英怪中文全名（供横幅 / 自测；机制数值在各子类常量里，不在此表）
+const ELITE_CN := [
+	"星盗战将 · 破罩精锐",
+	"弹幕堡垒将 · 移动炮台",
+	"增殖指挥将 · 召唤母舰",
+	"护盾冲锋将 · 朝向重甲",
+]
+
+
+static func elite_cn(e: int) -> String:
+	return ELITE_CN[_elite_idx(e)]
+
+
+static func _elite_idx(e: int) -> int:
+	return clampi(e, 0, ELITE_CN.size() - 1)
 
 
 static func cn(k: int) -> String:

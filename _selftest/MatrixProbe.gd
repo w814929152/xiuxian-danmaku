@@ -6,6 +6,14 @@ extends Node2D
 ## 跑法：
 ##   Godot_console --headless --path <项目> --quit-after N res://_selftest/MatrixProbe.tscn
 ##
+## 🔴🔴 **本文件不在门禁链路上** 🔴🔴
+##   门禁跑的是 `res://_selftest/SelfTest.tscn`，它**不加载本场景** —— 写在这里的
+##   断言一次都不会执行。2026-09-22 实踩：把 L3 散热倍率断言改到新值、并新增一条
+##   「阶段切换不得硬编码 P1 窗口」的元断言，跑门禁 fails=0；做变异测试把实现改回
+##   旧值，门禁**仍是 fails=0** —— 不是断言不敏感，是它压根没跑。
+##   **新增回归断言一律写进 `SelfTest.gd`**（见那里 `_test_l3_vent()` 的同类注释）。
+##   本文件只在需要五关全矩阵普查时**手动**跑一次，不是回归网的一部分。
+##
 ## ⚠ 本探针**不假装覆盖**下列项，它们必须人工跑（headless 看不到、掐不了表）：
 ##   · 一切视觉项（弹幕主色读出来是蓝还是白 / 护罩边缘预告闪不闪 / 舱盖开没开）
 ##   · 一切掐表项（单关时长 ~60s / 波次 gap / 呼吸窗口 1.2s 的手感）
@@ -116,8 +124,10 @@ func _t_stage_params() -> void:
 	_eqf(StageCfg.heat_window(3, 2), 2.2, "L3 P2 散热窗口")
 	_eqf(StageCfg.heat_window(3, 3), 1.6, "L3 P3 散热窗口")
 	_eqf(StageCfg.heat_window_rage(3), 1.2, "L3 狂暴散热窗口")
-	_eqf(StageCfg.heat_mul(3, false), 3.0, "L3 散热倍率")
-	_eqf(StageCfg.heat_mul(3, true), 4.0, "L3 狂暴散热倍率")
+	# 2026-09-22 由 ×3.0 / ×4.0 下调 —— 原型实测 L3 Boss 战 19.2s 比 L2 25.3s 还短，
+	#   散热期 ×3.0 压过常驻减伤 70%（散热占全程 53.7%，平均倍率 1.75）。见提案 §1.5。
+	_eqf(StageCfg.heat_mul(3, false), 1.8, "L3 散热倍率（下调后）")
+	_eqf(StageCfg.heat_mul(3, true), 2.4, "L3 狂暴散热倍率（下调后）")
 	_eqf(StageCfg.bullet_scale(3), 0.85, "L3 弹幕密度")
 	# 非 L3 一律 0 = 不触发
 	_eqf(StageCfg.heat_window(1, 1), 0.0, "非 L3 散热窗口为 0")
@@ -330,7 +340,7 @@ func _t_l3_heat() -> void:
 	var t0 := b._skill_t
 	await _frames(20)
 	_ck(absf(b._skill_t - t0) < 0.001, "② 散热期：停火（_skill_t 未推进）")
-	# ③ ×3.0 且**不叠共振**：同色 / 异色两次伤害必须一样
+	# ③ ×1.8 且**不叠共振**：同色 / 异色两次伤害必须一样
 	var hp_a := b.hp
 	b.hit(100, Game.RED)
 	var d_red := hp_a - b.hp
@@ -340,15 +350,29 @@ func _t_l3_heat() -> void:
 	_ck(d_red == d_blue,
 		"③ 散热期不叠共振：同色 %d / 异色 %d 必须相等" % [d_red, d_blue])
 	# 主理人终裁（2026-09-22）：常驻减伤 与 散热倍率是**互斥分支，不是连乘**。
-	#   ×3.0 是**最终倍率**，不是叠在减伤上的系数。100 原始伤害：
-	#   常态落 30（常驻减伤 70%）/ 散热期落 300（净 ×3.0）/ 狂暴散热期落 400。
-	_eq(d_red, 300, "③ 散热期 100 伤害 → 净 ×3.0 → 落 300（常驻减伤解除）")
+	#   ×1.8 是**最终倍率**，不是叠在减伤上的系数。100 原始伤害：
+	#   常态落 30（常驻减伤 70%）/ 散热期落 180（净 ×1.8）/ 狂暴散热期落 240。
+	_eq(d_red, 180, "③ 散热期 100 伤害 → 净 ×1.8 → 落 180（常驻减伤解除）")
 	# 复位：等窗口**真的**走完（headless 帧率 ~140fps，不能用帧数折算秒数）
 	var waited := 0
 	while b.venting and waited < 1200:
 		await _frames(10)
 		waited += 10
 	_ck(not b.venting, "复位：venting 归位（舱盖合上，等了 %d 帧）" % waited)
+
+	# ④ 阶段切换白送的散热时长必须按**新阶段**给（P2 2.2 / P3 1.6），不得硬编码
+	#   P1 的 3.0s —— 两次切换各白送 3.0s（共 6.0s）按旧倍率 ≈ 1710 点，超 3200
+	#   总血的一半，是 L3 难度断崖的第二根因。此断言对「改回硬编码」敏感。
+	b.phase = 2
+	b._on_phase()
+	_eqf(b._heat_t, 2.2, "④ 切 P2：白送散热 = P2 窗口 2.2s（不是 P1 的 3.0s）")
+	b.venting = false
+	b._heat_t = 0.0
+	b.phase = 3
+	b._on_phase()
+	_eqf(b._heat_t, 1.6, "④ 切 P3：白送散热 = P3 窗口 1.6s")
+	b.venting = false
+	b._heat_t = 0.0
 
 	var hp_c := b.hp
 	b.hit(100, Game.RED)

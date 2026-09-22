@@ -7,7 +7,7 @@ signal pause_toggled(paused: bool)
 ## 玩家请求重来本关
 signal restart_requested()
 
-# ---------------------------------------------------------------- 狂暴血光
+# ---------------------------------------------------------------- 狂暴赤光
 ## 屏幕四周的血色：越靠边越浓。用「多层矩形」而不是一次渐变 ——
 ## CanvasItem 没有渐变填充 API，多层叠加是唯一不依赖顶点色插值的做法。
 ## 层数 × 每层厚度 = 覆盖深度（20 × 9 = 180px）
@@ -115,7 +115,7 @@ func _rage_edge() -> void:
 
 
 ## 核心狂暴 —— 屏幕四周泛起血色。三条节奏叠在一起：
-##   1. **呼吸**（RAGE_BREATH）：缓慢起伏，让血光「活着」而不是一层死贴纸；
+##   1. **呼吸**（RAGE_BREATH）：缓慢起伏，让赤光「活着」而不是一层死贴纸；
 ##   2. **心跳**（RAGE_BEAT）：每 RAGE_BEAT_T 秒一次尖峰衰减，这才是「闪」；
 ##   3. **强闪**（_rage_flash）：刚跌破三成那一下的爆闪 ——
 ##      狂暴是局面转折点，玩家需要一帧就能读到的信号，不能只靠横幅。
@@ -166,15 +166,15 @@ func _buff_row(p: Player) -> void:
 	var cols: Array[Color] = []
 	# COL 是未类型化的 const Array，下标取值必须显式写明类型才能推断
 	if p.multi > 0:
-		var cm: Color = Pickup.COL[Pickup.T.MULTI]
+		var cm: Color = PickupCfg.COL[Pickup.T.MULTI]
 		chips.append("弹道 ×%d" % p.rows())
 		cols.append(cm)
 	if p.atk_up > 0:
-		var ca: Color = Pickup.COL[Pickup.T.ATK]
+		var ca: Color = PickupCfg.COL[Pickup.T.ATK]
 		chips.append("攻击 +%d%%" % int(roundf((p.atk_mul - 1.0) * 100.0)))
 		cols.append(ca)
 	if p.invincible:
-		var ci: Color = Pickup.COL[Pickup.T.INVINC]
+		var ci: Color = PickupCfg.COL[Pickup.T.INVINC]
 		chips.append("力场 %.1fs" % p.invinc)
 		cols.append(ci)
 	# 寒霜疾甲 · 闪避：只读 Player 暴露的剩余秒数，HUD 不自己算时间
@@ -198,20 +198,20 @@ func _draw() -> void:
 
 	# ---------------- 玩家 ----------------
 	if p != null and is_instance_valid(p):
-		var hp_r := float(p.hp) / float(Player.MAX_HP)
+		var hp_r := float(p.hp) / float(PlayerCfg.MAX_HP)
 		var hpc := Color(1.0, 0.32, 0.36)
 		if hp_r < 0.3:
 			hpc = Color(1.0, 0.18, 0.22)
 		_bar(26.0, 24.0, 320.0, 20.0, hp_r, hpc)
-		DrawUtil.txt(self, "生命 %d / %d" % [p.hp, Player.MAX_HP],
+		DrawUtil.txt(self, "生命 %d / %d" % [p.hp, PlayerCfg.MAX_HP],
 			Vector2(36.0, 40.0), 15, Color(0.94, 0.95, 1.0))
 
 		# 护盾（取消自动回复后没有读条了 —— 数值直接带上限显示，玩家才看得出满值在哪）
-		var sk := float(p.shield) / float(Player.SHIELD_MAX)
+		var sk := float(p.shield) / float(PlayerCfg.SHIELD_MAX)
 		var skc := Color(0.93, 0.96, 1.0, 0.95) if p.color == Game.WHITE \
 			else Color(0.55, 0.60, 0.72, 0.38)
 		_bar(26.0, 52.0, 320.0, 12.0, sk, skc)
-		DrawUtil.txt(self, "护盾 %d/%d" % [p.shield, Player.SHIELD_MAX],
+		DrawUtil.txt(self, "护盾 %d/%d" % [p.shield, PlayerCfg.SHIELD_MAX],
 			Vector2(354.0, 63.0), 14,
 			Color(0.80, 0.86, 1.0) if p.color == Game.WHITE else Color(0.5, 0.55, 0.66))
 		if p.color != Game.WHITE:
@@ -220,7 +220,7 @@ func _draw() -> void:
 
 		# 引力束过热（引力束甲专属：满值即停手散热）
 		if p.color == Game.YELLOW or p.heat > 0.0:
-			var hr := clampf(p.heat / Player.HEAT_MAX, 0.0, 1.0)
+			var hr := clampf(p.heat / PlayerCfg.HEAT_MAX, 0.0, 1.0)
 			var hc := Color(1.0, 0.35, 0.20) if p.overheated \
 				else Color(1.0, 0.80, 0.22)
 			_bar(26.0, 84.0, 320.0, 10.0, hr, hc)
@@ -319,8 +319,8 @@ func _draw() -> void:
 				Vector2(Game.VIEW_W * 0.5, wy + 4.0), 15,
 				Color(0.72, 0.76, 0.88), HORIZONTAL_ALIGNMENT_CENTER)
 
-	# ---------------- 核心狂暴：屏幕四周血光 ----------------
-	# 画在横幅之下：横幅的文字仍压在血光之上，读得清
+	# ---------------- 核心狂暴：屏幕四周赤光 ----------------
+	# 画在横幅之下：横幅的文字仍压在赤光之上，读得清
 	if boss != null and is_instance_valid(boss) and boss.enraged:
 		_rage_vignette()
 

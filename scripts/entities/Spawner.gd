@@ -17,8 +17,10 @@ extends RefCounted
 ## [param y]      出场纵坐标。
 ## [param hp_scale] 强度缩放（LEVEL_HP × WAVE_HP）。
 ## [param stage]  所属关卡（1-based）。
+## [param warp_x] 屏内跃迁横坐标（< 0 = 常规右侧屏外飞入，默认值即历史行为 ——
+##                既有调用点零改动；驻留阵地波才传 ≥ 0，见 `Enemy.setup`）。
 static func enemy(world: Node2D, kind: int, color: int, pat: String, y: float,
-		hp_scale: float, stage: int) -> Enemy:
+		hp_scale: float, stage: int, warp_x: float = -1.0) -> Enemy:
 	if world == null:
 		return null
 	var e := Enemy.new()
@@ -31,7 +33,7 @@ static func enemy(world: Node2D, kind: int, color: int, pat: String, y: float,
 		e.no_block_clear = false
 	e._phase = randf() * TAU
 	world.add_child(e)
-	e.setup(color, pat, y, hp_scale)
+	e.setup(color, pat, y, hp_scale, warp_x)
 	# 独有怪：覆盖血量倍率 / 分值（GRUNT 保持 setup 内的四色数值，一行不动）
 	if kind != EnemyKind.K.GRUNT:
 		e.hp = int(roundf(float(e.hp) * EnemyKind.hp_mul(kind)))

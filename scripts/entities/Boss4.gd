@@ -65,7 +65,9 @@ class SubCore extends Damageable:
 		if boss_ref == null or not is_instance_valid(boss_ref) or dead:
 			return
 		_a += delta * 0.9
-		position = boss_ref.position + Vector2.RIGHT.rotated(_a) * 150.0
+		# 轨道按 R_MAIN 比例化（§1.8 v4）：L4 @R_MAIN 77 × 1.95 = 150.15 ≈ 旧写死 150.0
+		position = boss_ref.position + Vector2.RIGHT.rotated(_a) \
+			* (StageCfg.boss_r_main(boss_ref.stage) * 1.95)
 		_flash = maxf(0.0, _flash - delta)
 		queue_redraw()
 

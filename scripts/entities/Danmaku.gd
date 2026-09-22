@@ -16,7 +16,7 @@ const POOL_KEY := "danmaku"
 ## 视觉 vs 判定（数值由烘焙脚本断言锁定）：实心核心等效半径 ≈10.3px、含光晕 ≈11.6px，
 ## 判定半径 9 —— 核心口径视觉大出约 1.3px（视觉/判定 ≈ 1.14）。
 ## 视觉略大于判定是初版手感的一部分，不要「顺手优化」成所见即所中。
-const ART_BASE_R := 9.0
+## 剪影基准半径取自 EnemyCfg。
 
 var color: int = Game.RED
 var vel := Vector2.ZERO
@@ -88,7 +88,7 @@ func setup(c: int, p: Vector2, v: Vector2, d: int, r: float) -> void:
 	if _art != null:
 		_art.texture = ArtAssets.tex("danmaku")
 		_art.modulate = Game.COLOR_MAIN[color]
-		_art.scale = Vector2.ONE * (r / ART_BASE_R)
+		_art.scale = Vector2.ONE * (r / EnemyCfg.DANMAKU_ART_BASE_R)
 	# spin 一律归零（池化复用必须覆盖上一颗弹留下的自转）：
 	# NEAREST 过滤下旋转像素图会边缘抖动；圆形白模自转也不携带任何信息。
 

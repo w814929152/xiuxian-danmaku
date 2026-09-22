@@ -6,8 +6,7 @@ extends Area2D
 ## 不做对象池 —— 全程只有这一道。
 ## 伤害按 tick 结算给所有压在光柱上的 Damageable，所以是「持续输出」而非弹丸。
 
-const TICK := 0.2          # 结算间隔（秒）
-const HALF_H := 9.0        # 光柱半高
+## 结算间隔 / 光柱半高取自 PlayerCfg。
 
 var color: int = Game.YELLOW
 var dps := 120.0
@@ -15,7 +14,7 @@ var dps := 120.0
 var world: Node2D = null
 ## 粗细系数：增幅核心层数越多，光柱越粗（碰撞体同步加宽，不只是好看）
 var width_mul: float = 1.0
-## 多道符光并排时各自的竖直偏移（由 Player 计算后传入）
+## 多道光束并排时各自的竖直偏移（由 Player 计算后传入）
 var y_off: float = 0.0
 var on := false
 var length := 60.0
@@ -31,7 +30,7 @@ func _ready() -> void:
 	z_index = 20
 	var cs := CollisionShape2D.new()
 	_shape = RectangleShape2D.new()
-	_shape.size = Vector2(60.0, HALF_H * 2.0)
+	_shape.size = Vector2(60.0, PlayerCfg.BEAM_HALF_H * 2.0)
 	cs.shape = _shape
 	add_child(cs)
 	turn_off()
@@ -58,7 +57,7 @@ func aim(player_x: float, y: float = 0.0) -> void:
 	y_off = y
 	length = maxf(60.0, Game.VIEW_W + 20.0 - player_x)
 	if _shape != null:
-		_shape.size = Vector2(length, HALF_H * 2.0 * width_mul)
+		_shape.size = Vector2(length, PlayerCfg.BEAM_HALF_H * 2.0 * width_mul)
 	position = Vector2(length * 0.5, y_off)
 
 
@@ -67,14 +66,14 @@ func _physics_process(delta: float) -> void:
 		return
 	_t += delta
 	_acc += delta
-	while _acc >= TICK:
-		_acc -= TICK
+	while _acc >= PlayerCfg.BEAM_TICK:
+		_acc -= PlayerCfg.BEAM_TICK
 		_tick()
 	queue_redraw()
 
 
 func _tick() -> void:
-	var dmg := maxi(1, roundi(dps * TICK))
+	var dmg := maxi(1, roundi(dps * PlayerCfg.BEAM_TICK))
 	var found := false
 	var hit_local := Vector2.ZERO
 	for a in get_overlapping_areas():

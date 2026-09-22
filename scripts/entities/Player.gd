@@ -7,60 +7,21 @@ signal stat_changed()
 signal armor_changed(c: int)
 signal player_died()
 
-const MAX_HP := 100
-## 光子护盾上限。护盾**不会**自动回复 —— 唯一充能入口是穿着光子盾甲（白）
-## 吞下一枚光子弹（同色吸收），见 take_hit()。
-const SHIELD_MAX := 20
-## 光子盾甲每吸收一枚光子弹的充能量（钳到 SHIELD_MAX 为止）
-const SHIELD_GAIN := 10
-const BASE_SPEED := 340.0
-const BLUE_MUL := 1.5          # 寒霜疾甲：移速 +50%
-## 寒霜疾甲：吞下一枚寒霜弹后获得 0.5 秒闪避，期间不承受任何**弹幕**伤害。
-## 只挡走 take_hit() 的弹幕通道 —— 殉爆者冲撞 / 冲击环是刻意绕过同色免疫的
-## 物理通道（EnemyBrain 里直接扣 hp），不接入本状态。
-const DODGE_TIME := 0.5
-## 闪避期的机体透明度基准：整体变淡，只叠极轻呼吸。
-## 不做高频闪烁 —— 闪避只有 0.5 秒，闪起来玩家根本读不清自己在哪里。
-const DODGE_ALPHA := 0.28
-const DODGE_BREATH := 0.06
-const HIT_R := 11.0
-const FIRE_CD := 0.105
-const SWAP_CD := 0.20
-const INVULN := 0.85
+# ---------------------------------------------------------------- 数值
+## 全部取自 scripts/PlayerCfg.gd —— 本文件只留逻辑，不再自己定义数字。
 
-# ---------------------------------------------------------------- 引力束甲 · 引力束过热
-const BEAM_DPS := 120.0        # 引力束每秒伤害
-const HEAT_MAX := 100.0        # 过热值上限，满则无法出束
-const HEAT_RISE := 20.0        # 出束时每秒累积
-const HEAT_COOL_DELAY := 0.5   # 停火多久后开始散热
-const HEAT_COOL := 30.0        # 散热速度（每秒）
-const HEAT_VENT := 30.0        # 触到引力（黄）弹时立刻散去
-## 解锁阈值：过热后必须散到这个数值以下才能重新出束。
-## 不加这道闸门的话，按住不放会卡在「锁 0.5 秒 -> 亮 1 帧 -> 再锁」的抖动里
-## （升温 20/s 远快于每帧的散热量，占空比只剩约 5%），引力束等于废掉。
-const HEAT_REARM := 60.0
-
-# ---------------------------------------------------------------- 道具增益
-const HEAL_AMOUNT := 20       # 修复包：回复生命
-const MULTI_MAX := 3          # 刃影模块：最多再叠 3 排弹道
-const ATK_STEP := 0.30        # 增幅核心：每层 +30%
-const ATK_MAX := 4            # 增幅核心：最多叠 4 层（+120%）
-const INVINC_TIME := 6.0      # 力场罩：无敌 6 秒
-## 增幅核心的视觉强度：光刃放大 / 引力束加粗都用这个系数
-const ATK_VIS := 0.22
-
-var hp: int = MAX_HP
-## 光子护盾：开局为 0，靠吸收光子弹充能（上限 SHIELD_MAX，不自动回复）
+var hp: int = PlayerCfg.MAX_HP
+## 光子护盾：开局为 0，靠吸收光子弹充能（上限 PlayerCfg.SHIELD_MAX，不自动回复）
 var shield: int = 0
 ## 过热值：只在使用引力束甲（黄）出束时累积
 var heat: float = 0.0
 ## 刃影模块层数 = 额外弹道排数（电浆基准双排，其余基准单排，引力基准一道束）
 var multi: int = 0
-## 增幅核心层数 = 攻击力 +30% × 层数
+## 增幅核心层数 = 攻击力 +10% × 层数
 var atk_up: int = 0
 ## 力场罩剩余秒数（> 0 即处于无敌）
 var invinc: float = 0.0
-var _locked := false       # 过热闭锁：一旦满值，须散到 HEAT_REARM 以下才解锁
+var _locked := false       # 过热闭锁：一旦满值，须散到 PlayerCfg.HEAT_REARM 以下才解锁
 ## 由 Level 显式注入：光刃与特效的挂载容器（不靠 get_parent 猜）
 var world: Node2D = null
 ## 本局携带的两件战甲（进入关卡前选定，关卡内按空格轮换）
@@ -88,15 +49,15 @@ var color: int:
 			return Game.WHITE
 		return armors[armor_idx % armors.size()]
 
-## 过热闭锁中（满值 -> 未散到 HEAT_REARM 之前）无法出光
+## 过热闭锁中（满值 -> 未散到 PlayerCfg.HEAT_REARM 之前）无法出光
 var overheated: bool:
 	get:
 		return _locked
 
-## 攻击力倍率（增幅核心层数 × 30%）
+## 攻击力倍率（增幅核心层数 × ATK_STEP）。公式只在 PlayerCfg.atk_mul 里写一遍。
 var atk_mul: float:
 	get:
-		return 1.0 + ATK_STEP * float(atk_up)
+		return PlayerCfg.atk_mul(atk_up)
 
 ## 力场罩生效中
 var invincible: bool:
@@ -126,23 +87,23 @@ func rows() -> int:
 
 ## 单发伤害（受增幅核心影响）
 func sword_damage() -> int:
-	var base := 8 if color == Game.RED else 10
+	var base := PlayerCfg.SWORD_DMG_RED if color == Game.RED else PlayerCfg.SWORD_DMG
 	return maxi(1, int(roundf(float(base) * atk_mul)))
 
 
 ## 光刃尺寸系数：增幅核心层数越多，剑身越大（碰撞体同步放大）
 func sword_size() -> float:
-	return 1.0 + ATK_VIS * float(atk_up)
+	return PlayerCfg.atk_vis(atk_up)
 
 
 ## 引力束每秒伤害（受增幅核心影响）
 func beam_dps() -> float:
-	return BEAM_DPS * atk_mul
+	return PlayerCfg.BEAM_DPS * atk_mul
 
 
 ## 引力束粗细系数：增幅核心层数越多，光柱越粗
 func beam_width() -> float:
-	return 1.0 + ATK_VIS * float(atk_up)
+	return PlayerCfg.atk_vis(atk_up)
 
 
 func _ready() -> void:
@@ -151,7 +112,7 @@ func _ready() -> void:
 	z_index = 12
 	var cs := CollisionShape2D.new()
 	var sh := CircleShape2D.new()
-	sh.radius = HIT_R
+	sh.radius = PlayerCfg.HIT_R
 	cs.shape = sh
 	add_child(cs)
 	position = Vector2(230.0, Game.VIEW_H * 0.5)
@@ -180,7 +141,7 @@ func _process(delta: float) -> void:
 	# 否则吸弹后的 0.85 秒无敌帧会把闪避的读条盖掉，玩家看不出自己还在闪避中。
 	var a := 1.0
 	if _dodge > 0.0:
-		a = DODGE_ALPHA + DODGE_BREATH * (0.5 + 0.5 * sin(_time * 8.0))
+		a = PlayerCfg.DODGE_ALPHA + PlayerCfg.DODGE_BREATH * (0.5 + 0.5 * sin(_time * 8.0))
 	elif _invuln > 0.0:
 		a = 0.35 + 0.35 * (0.5 + 0.5 * sin(_time * 45.0))
 	modulate.a = a
@@ -209,7 +170,7 @@ func _move(delta: float) -> void:
 		d.y += 1.0
 	if d != Vector2.ZERO:
 		d = d.normalized()
-		var sp := BASE_SPEED * (BLUE_MUL if color == Game.BLUE else 1.0)
+		var sp := PlayerCfg.BASE_SPEED * (PlayerCfg.BLUE_MUL if color == Game.BLUE else 1.0)
 		position += d * sp * delta
 	position = Game.clamp_view(position, 28.0)
 
@@ -232,7 +193,7 @@ func _shoot() -> void:
 		return
 	if _fire > 0.0:
 		return
-	_fire = FIRE_CD
+	_fire = PlayerCfg.FIRE_CD
 	_fire_swords()
 
 
@@ -293,17 +254,17 @@ func _beam_y(i: int, n: int) -> float:
 func _update_heat(delta: float) -> void:
 	if _firing:
 		_idle = 0.0
-		heat = minf(HEAT_MAX, heat + HEAT_RISE * delta)
-		if not _locked and heat >= HEAT_MAX:
+		heat = minf(PlayerCfg.HEAT_MAX, heat + PlayerCfg.HEAT_RISE * delta)
+		if not _locked and heat >= PlayerCfg.HEAT_MAX:
 			_locked = true
 			Fx.pop(world, position + Vector2(0.0, -46.0), "过 热",
 				Color(1.0, 0.55, 0.30), 20, 0.9)
 			stat_changed.emit()
 		return
 	_idle += delta
-	if _idle >= HEAT_COOL_DELAY and heat > 0.0:
-		heat = maxf(0.0, heat - HEAT_COOL * delta)
-		if _locked and heat <= HEAT_REARM:
+	if _idle >= PlayerCfg.HEAT_COOL_DELAY and heat > 0.0:
+		heat = maxf(0.0, heat - PlayerCfg.HEAT_COOL * delta)
+		if _locked and heat <= PlayerCfg.HEAT_REARM:
 			_locked = false
 			stat_changed.emit()
 
@@ -319,7 +280,7 @@ func do_swap() -> void:
 	if armors.size() < 2:
 		return
 	armor_idx = (armor_idx + 1) % armors.size()
-	_swap = SWAP_CD
+	_swap = PlayerCfg.SWAP_CD
 	_invuln = maxf(_invuln, 0.18)
 	# 闪避是寒霜疾甲的附属能力：一脱甲就立刻失效（不留残余时间）
 	_dodge = 0.0
@@ -341,11 +302,18 @@ func take_hit(c: int, dmg: int) -> bool:
 		return false
 	# 引力（黄）弹：不论身上是否引力束甲，触及即引走热气
 	if c == Game.YELLOW and heat > 0.0:
-		heat = maxf(0.0, heat - HEAT_VENT)
-		Fx.pop(world, position + Vector2(0.0, -46.0), "散热 -%d" % int(HEAT_VENT),
+		heat = maxf(0.0, heat - PlayerCfg.HEAT_VENT)
+		Fx.pop(world, position + Vector2(0.0, -46.0), "散热 -%d" % int(PlayerCfg.HEAT_VENT),
 			Game.COLOR_MAIN[Game.YELLOW], 16, 0.7)
 		stat_changed.emit()
-	# 力场罩：六秒内诸法不侵（放在扣血之前，所以既不扣血也不消耗护盾）
+	# 光子盾甲 · 充能。判定刻意排在力场罩早退**之前**：
+	# 力场罩的语义是「弹幕穿过」，但裁决是「力场罩期间吸到光子弹照样充能」——
+	# 所以先充能，再由力场罩决定弹幕穿不穿（返回 false）。
+	# 守卫把 c 与 color 两态都写全：少了 c 会让任意颜色都充能，
+	# 少了 color 会让任意战甲都充能。
+	if c == Game.WHITE and color == Game.WHITE:
+		_gain_shield()
+	# 力场罩：六秒内免疫一切（放在扣血之前，所以既不扣血也不消耗护盾）
 	if invinc > 0.0:
 		_immune = 0.22
 		Fx.ring(world, position, Game.COLOR_MAIN[randi() % 4], 17.0, 48.0, 0.26, 4.0)
@@ -358,26 +326,16 @@ func take_hit(c: int, dmg: int) -> bool:
 		# 寒霜疾甲专属：吸收的同时相位化解 -> 进入 0.5 秒闪避。
 		# 其余三件战甲吸弹只有上面那圈收拢光环，不带闪避。
 		if c == Game.BLUE:
-			_dodge = DODGE_TIME
+			_dodge = PlayerCfg.DODGE_TIME
 			Fx.ring(world, position, Game.COLOR_MAIN[Game.BLUE], 12.0, 46.0, 0.30, 3.0)
 			Fx.pop(world, position + Vector2(0.0, -30.0), "闪避",
 				Game.COLOR_GLOW[Game.BLUE], 16, 0.5)
-		# 光子盾甲专属：吞下的光子弹不白吞 —— 转为护盾充能（+10，钳到上限）。
-		# 这是护盾**唯一**的充能入口（自动回复已取消）。
-		# 守卫把 c 与 color 两态都写全：上面 `c == color` 已保证同色，这里再钉一次
-		# 「必须穿着光子盾甲」，免得有人把它挪到别的分支里去。
-		if c == Game.WHITE and color == Game.WHITE:
-			var before := shield
-			shield = mini(SHIELD_MAX, shield + SHIELD_GAIN)
-			stat_changed.emit()
-			if shield > before:
-				Fx.pop(world, position + Vector2(0.0, -32.0), "护盾 +%d" % (shield - before),
-					Game.COLOR_GLOW[Game.WHITE], 16, 0.7)
-			else:
-				Fx.pop(world, position + Vector2(0.0, -32.0), "护盾已满",
-					Game.COLOR_GLOW[Game.WHITE], 16, 0.7)
+		# 光子护盾的充能**不在这里** —— 已提到力场罩早退之前统一走 _gain_shield()，
+		# 力场罩期间吸弹也要充能；留在这里会一发弹充两次（+20）。
 		return true
 
+	# 异色减伤是光子盾甲**专属**：`color == Game.WHITE` 这道守卫不能删 ——
+	# 删掉之后红/蓝/黄甲也能拿护盾挡伤害，等于给所有甲白送一层血。
 	if color == Game.WHITE and shield > 0:
 		var ab := mini(shield, dmg)
 		shield -= ab
@@ -387,7 +345,7 @@ func take_hit(c: int, dmg: int) -> bool:
 			Color(0.90, 0.95, 1.0), 16)
 	if dmg > 0:
 		hp -= dmg
-		_invuln = INVULN
+		_invuln = PlayerCfg.INVULN
 		Fx.burst(world, position, Game.COLOR_MAIN[c], 14, 300.0, 0.5)
 		Fx.pop(world, position + Vector2(0.0, -30.0), "-%d" % dmg,
 			Color(1.0, 0.55, 0.5), 18)
@@ -399,33 +357,52 @@ func take_hit(c: int, dmg: int) -> bool:
 	return true
 
 
+## 光子盾甲 · 护盾充能（唯一入口；自动回复已取消）。
+## 抽成方法是为了让「力场罩期间」和「同色吸收」两条路径共用同一份实现 ——
+## 充能判定必须排在力场罩早退之前（力场罩期间吸到光子弹也要充能），
+## 若两条分支各写一遍，一发弹就会充两次（+10 变 +20）。
+## 飘字写的是**实际增量**而不是常量 PlayerCfg.SHIELD_GAIN：剩余容量不足一次充能时
+## （例如 15/20）只加 5，飘「+10」就是在骗玩家。
+func _gain_shield() -> void:
+	var before := shield
+	shield = mini(PlayerCfg.SHIELD_MAX, shield + PlayerCfg.SHIELD_GAIN)
+	stat_changed.emit()
+	if shield > before:
+		Fx.pop(world, position + Vector2(0.0, -32.0), "护盾 +%d" % (shield - before),
+			Game.COLOR_GLOW[Game.WHITE], 16, 0.7)
+	else:
+		Fx.pop(world, position + Vector2(0.0, -32.0), "护盾已满",
+			Game.COLOR_GLOW[Game.WHITE], 16, 0.7)
+
+
 # ---------------------------------------------------------------- 拾取
 ## 施加一个道具效果，返回给玩家看的飘字（空串 = 不提示）。
 ## 效果挂在玩家身上，所以入口放这里；道具只负责认出玩家并调用。
 func apply_pickup(k: int) -> String:
 	match k:
 		Pickup.T.HEAL:
-			if hp >= MAX_HP:
+			if hp >= PlayerCfg.MAX_HP:
 				return "生命已满"
-			hp = mini(MAX_HP, hp + HEAL_AMOUNT)
+			hp = mini(PlayerCfg.MAX_HP, hp + PlayerCfg.HEAL_AMOUNT)
 			stat_changed.emit()
-			return "生命 +%d" % HEAL_AMOUNT
+			# 飘字文案统一由 PickupCfg.tip 生成（数值变了文案自动跟着变）
+			return PickupCfg.tip(Pickup.T.HEAL)
 		Pickup.T.MULTI:
-			if multi >= MULTI_MAX:
+			if multi >= PlayerCfg.MULTI_MAX:
 				return "弹道已满"
 			multi += 1
 			stat_changed.emit()
-			return "弹道 +1 · 共 %d 排" % rows()
+			return "%s · 共 %d 排" % [PickupCfg.tip(Pickup.T.MULTI), rows()]
 		Pickup.T.ATK:
-			if atk_up >= ATK_MAX:
+			if atk_up >= PlayerCfg.ATK_MAX:
 				return "攻击已满"
 			atk_up += 1
 			stat_changed.emit()
-			return "攻击 +%d%%" % int(ATK_STEP * 100.0)
+			return PickupCfg.tip(Pickup.T.ATK)
 		Pickup.T.INVINC:
-			invinc = maxf(invinc, INVINC_TIME)
+			invinc = maxf(invinc, PlayerCfg.INVINC_TIME)
 			stat_changed.emit()
-			return "力场罩 · %.0f 秒" % INVINC_TIME
+			return PickupCfg.tip(Pickup.T.INVINC)
 	return ""
 
 
@@ -464,12 +441,12 @@ func _draw() -> void:
 		var a := 0.22 * (1.0 - float(i) / float(_trail.size()))
 		draw_circle(p, 12.0 - i, Color(g.r, g.g, g.b, a))
 
-	# 灵光外环
+	# 辉光外环
 	draw_circle(Vector2.ZERO, 26.0 + 3.0 * pulse, Color(g.r, g.g, g.b, 0.10))
 	draw_arc(Vector2.ZERO, 23.0 + 2.5 * pulse, 0.0, TAU, 32,
 		Color(m.r, m.g, m.b, 0.45), 2.0, true)
 
-	# 力场罩：六秒无敌 —— 四色流转的护体罩 + 逆向游走的能量点
+	# 力场罩：六秒无敌 —— 四色流转的能量罩 + 逆向游走的能量点
 	if invinc > 0.0:
 		var ia := 0.70 + 0.30 * sin(_time * 8.0)
 		if invinc < 1.2:                     # 将散时急促闪烁，给玩家收尾提示
@@ -489,7 +466,7 @@ func _draw() -> void:
 
 	# 光子盾甲：护盾环
 	if c == Game.WHITE and shield > 0:
-		var sr := float(shield) / float(SHIELD_MAX)
+		var sr := float(shield) / float(PlayerCfg.SHIELD_MAX)
 		draw_arc(Vector2.ZERO, 30.0, -PI * 0.5, -PI * 0.5 + TAU * sr, 40,
 			Color(1.0, 1.0, 1.0, 0.85), 4.0, true)
 		draw_circle(Vector2.ZERO, 30.0, Color(0.95, 0.98, 1.0, 0.06))
@@ -519,7 +496,7 @@ func _draw() -> void:
 			])
 			draw_colored_polygon(sq, Color(m.r, m.g, m.b, 0.9))
 
-	# 引力束甲：绕身引力符
+	# 引力束甲：绕身引力环
 	if c == Game.YELLOW:
 		for i in 3:
 			var a := _time * 1.6 + TAU * float(i) / 3.0
@@ -534,7 +511,7 @@ func _draw() -> void:
 
 	# 引力束甲：过热环（满环即滞）
 	if c == Game.YELLOW and heat > 0.0:
-		var hr := clampf(heat / HEAT_MAX, 0.0, 1.0)
+		var hr := clampf(heat / PlayerCfg.HEAT_MAX, 0.0, 1.0)
 		var hc := Color(1.0, 0.35, 0.20) if overheated else Color(1.0, 0.78, 0.20)
 		draw_arc(Vector2.ZERO, 38.0, -PI * 0.5, -PI * 0.5 + TAU * hr, 40,
 			Color(hc.r, hc.g, hc.b, 0.9), 4.0, true)
@@ -572,14 +549,14 @@ func _draw() -> void:
 	draw_circle(Vector2(17.0, -1.0), 1.2, m)
 
 	# 判定点
-	draw_circle(Vector2.ZERO, HIT_R, Color(m.r, m.g, m.b, 0.13))
+	draw_circle(Vector2.ZERO, PlayerCfg.HIT_R, Color(m.r, m.g, m.b, 0.13))
 	draw_circle(Vector2.ZERO, 3.2, Color(1.0, 1.0, 1.0, 0.95))
 
 	# 寒霜疾甲 · 闪避：一圈向外推的相位残影环。
 	# 与「同色吸收」那圈由外向内**收拢**的光环方向相反、颜色更亮 —— 玩家据此区分
 	# 「我只是吸了一发」和「我现在 0.5 秒内打不中」。
 	if _dodge > 0.0:
-		var ph := 1.0 - _dodge / DODGE_TIME          # 0（刚触发）-> 1（即将结束）
+		var ph := 1.0 - _dodge / PlayerCfg.DODGE_TIME          # 0（刚触发）-> 1（即将结束）
 		var pr := 20.0 + ph * 26.0
 		# 下限 0.35 是刻意的，别当冗余 maxf 删掉：闪避最后约 10%（剩余 ~0.05 秒）时，
 		# 衰减公式 0.80*(1-ph) 已降到约 0.08，残影环几乎不可见；而此刻机身仍是约 0.29

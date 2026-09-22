@@ -93,22 +93,15 @@ var _ward_cd_rage := 0.0
 var _ward_tell := 0.0      # 换色预告时长（秒）—— 读得出来，不靠背板
 var _resist := 0.0         # 常驻减伤（与颜色无关）：L3 耀斑号 = 0.70
 var _body_color := -1      # 本体固定色；-1 = 跟随护罩色（L1 熔核号 = 光子白）
-## L3 耀斑号【散热期】：装甲舱盖打开 -> 任意颜色伤害 ×3.0（狂暴 ×4.0）
+## L3 耀斑号【散热期】：装甲舱盖打开 -> 任意颜色伤害 ×1.8（狂暴 ×2.4）
+##   倍率由 StageCfg.heat_mul() 给，本类不硬编码；2026-09-22 由 ×3.0/×4.0 下调。
 ##   _heat_win = 本阶段散热时长（0 = 非 L3，不触发）；_heat_t = 剩余时长
 var _heat_win := 0.0
 var _heat_t := 0.0
-## 狂暴散热期结束的近距离冲击环半径（设计总纲 §D.3 原话：「散热期结束会喷一次
-##   近距离冲击环（半径 180），逼玩家打完就撤」）。
-##   StageCfg / BossCfg 都没有对应配置项，故在此落成常量并注明来源；日后若设计
-##   把它收进波次/关卡表，改走 StageCfg 访问器即可（与 heat_window / heat_mul 同族）。
-const HEAT_BLAST_R := 180.0
-## 冲击环伤害（主理人裁定：与 BossMine.DMG 同值 12，同族数值玩家已有直觉）。
-##   不加保险期 —— 环是瞬发的，不像雷有「刚落地贴脸瞬爆」的问题（BossMine.ARM
-##   是为那个场景存在的，这里照搬反而是多余机制）。
-const HEAT_BLAST_DMG := 12
+## 狂暴散热期结束的近距离冲击环（半径 / 伤害）取自 BossCfg —— 本文件只留逻辑。
 ## 散热期中 —— **字段名 `venting` 已定为跨线契约**：
 ##   HUD 用 `Object.get("venting")` 读它（缺字段按「非散热期」降级，不会崩 HUD），
-##   这是 L3「散热期 ×3.0 / ×4.0」能被玩家看见的唯一通道，**改名必须先同步 HUD**。
+##   这是 L3「散热期高倍率」能被玩家看见的唯一通道，**改名必须先同步 HUD**。
 ## Boss 自己也在三处消费：hit() 决定倍率、_draw() 画舱盖打开、_attack() 停火。
 var venting := false
 ## L5 终焉号【重构硬直】：阶段切换后 1.0s 完全停火（三次切换 = 三个呼吸点）
@@ -138,7 +131,12 @@ func _ready() -> void:
 	z_index = 10
 	var cs := CollisionShape2D.new()
 	var sh := CircleShape2D.new()
-	# 碰撞半径逐关不同（46/52/58/65/70，规格 §C.1）—— 越往后的旗舰擦弹余量越小
+	# 碰撞半径逐关不同（46/52/58/65/70，规格 §C.1）。
+	# 本体/碰撞比（剪影最远角 × R_MAIN ÷ R_HIT，V5 口径）实测 1.19~1.22，非单调：
+	# L1 1.217 → L2 1.212 → L3 1.206 → L4 1.193（最小）→ L5 1.224（最大，
+	# 即最接近 1.34 上限、最紧的一关）。勿按「越往后越小」推断。
+	# ⚠ 该比值 = (R_MAIN / R_HIT) × 剪影形状系数，两者都算：L3 曾因炮垒四角外突
+	#   做到 1.456，而它的 R_MAIN/R_HIT 只有 1.207。改剪影形状必须重跑 V5。
 	sh.radius = float(StageCfg.boss_radius(stage))
 	cs.shape = sh
 	add_child(cs)
@@ -294,12 +292,12 @@ func _attack(delta: float) -> void:
 			#   打完必须撤（设计总纲 §D.3）。非狂暴不喷 —— 常态散热期是安全窗口。
 			if enraged:
 				Fx.ring(world, position, Game.COLOR_MAIN[Game.RED],
-					40.0, HEAT_BLAST_R, 0.45, 11.0)
+					40.0, BossCfg.HEAT_BLAST_R, 0.45, 11.0)
 				# 半径内判定玩家（照 BossMine._boom() 的写法：距离判定，不走碰撞）
 				var blast_p := _live_player()
 				if blast_p != null:
-					if blast_p.position.distance_to(position) <= HEAT_BLAST_R:
-						blast_p.take_hit(Game.RED, HEAT_BLAST_DMG)
+					if blast_p.position.distance_to(position) <= BossCfg.HEAT_BLAST_R:
+						blast_p.take_hit(Game.RED, BossCfg.HEAT_BLAST_DMG)
 			_next_skill()
 		return
 	_cast -= delta
@@ -452,7 +450,7 @@ func _cast_step() -> void:
 			# 相④ 引力·黄：3 发黄雨（L3 `rain_yellow` = 2 发）
 			_rain(Game.YELLOW, _n(3), 0.35)
 		"mine_toss_y":
-			# 相④：2 枚黄雷（8s 自毁 = BossMine.LIFE，可被光刃提前引爆）
+			# 相④：2 枚黄雷（8s 自毁 = EnemyCfg.MINE_LIFE，可被光刃提前引爆）
 			_toss_mines(2)
 
 
@@ -553,10 +551,10 @@ func hit(dmg: int, c: int) -> void:
 		# 异色衰减由难度决定：简单 / 普通没有护罩，困难 = 60%
 		mul = 1.0 if c == ward else _off_color
 	# 常驻减伤 与 散热倍率 是**互斥分支，不是连乘**（主理人终裁 2026-09-22）。
-	#   理由：散热期是「玩家唯一的输出窗口」，若写成 0.3 × 3.0 = 净 0.9，会出现
+	#   理由：散热期是「玩家唯一的输出窗口」，若写成 0.3 × 1.8 = 净 0.54，会出现
 	#   「专门等到散热期打，伤害还不如打杂兵」—— 与奖励窗口的语义直接冲突。
-	#   设计 §D.3「复位回 ×0.3」里的 ×3.0 指的是**最终倍率**，不是叠在减伤上的系数。
-	#   L3 耀斑号：常态 0.3（常驻减伤 70%）/ 散热期 3.0 / 狂暴散热期 4.0。
+	#   设计 §D.3「复位回 ×0.3」里的 ×1.8 指的是**最终倍率**，不是叠在减伤上的系数。
+	#   L3 耀斑号：常态 0.3（常驻减伤 70%）/ 散热期 1.8 / 狂暴散热期 2.4。
 	if venting:
 		mul = StageCfg.heat_mul(stage, enraged)
 	elif _resist > 0.0:
@@ -631,10 +629,17 @@ func _on_phase() -> void:
 	if stage >= 1 and StageCfg.boss_phases(stage) >= 4:
 		_refit_t = 1.0
 		Fx.shock(world, position, Game.COLOR_MAIN[Game.WHITE], 720.0, 1.0)
-	# L3 耀斑号：阶段切换立刻给一次 3.0s 强制散热，作为阶段奖励（设计 §D.3）。
-	#   必须走 _enter_heat()：它才会置 venting，hit() 的 ×3.0 依赖这个标志位。
+	# L3 耀斑号：阶段切换立刻给一次强制散热，作为阶段奖励（设计 §D.3）。
+	#   必须走 _enter_heat()：它才会置 venting，hit() 的散热倍率依赖这个标志位。
+	#   ⚠ 时长按**新阶段**给（此处 phase 已更新，见 _check_phase），不要硬编码
+	#     heat_window(stage, 1)：那样两次切换各白送 3.0s（共 6.0s），按旧 ×3.0
+	#     计是 1710 点白送伤害 —— 超过 3200 总血的一半，L3 难度断崖的第二根因。
+	#     按阶段递减给（P2 2.2s / P3 1.6s）既符合「散热窗口随阶段缩短」的设计，
+	#     也与齐射后散热同源；狂暴期切换给 rage 窗口 1.2s。
 	if stage >= 1 and StageCfg.resident_resist(stage) > 0.0:
-		_enter_heat(StageCfg.heat_window(stage, 1))
+		var hw := StageCfg.heat_window_rage(stage) if enraged else StageCfg.heat_window(stage, phase)
+		if hw > 0.0:
+			_enter_heat(hw)
 	Fx.shock(world, position, Color(1.0, 1.0, 1.0), 640.0, 0.9)
 	Fx.ring(world, position, Game.COLOR_MAIN[Game.WHITE], 40.0, 420.0, 0.7, 12.0)
 	phase_chg.emit(phase)
@@ -741,12 +746,16 @@ func _draw() -> void:
 		# 护罩开启：本体外缘 2px CORE 白描边（§E.1 边缘通道）
 		BossArt.draw_body_rim(self, Game.COLOR_CORE[Game.WHITE], 2.0)
 
-	# 四色反应堆节点（当前护罩色的节点放大）——保留 17/11 尺寸差作为「当前护罩色」玩法读数
+	# 四色反应堆节点（当前护罩色的节点放大）——尺寸按 R_MAIN 比例化（§1.8 v4）：
+	#   旧写法写死 17/11，五关 R_MAIN 56→84 会让 L1 撑爆、L5 缩水。比值 1.545 锁死，
+	#   钳位保可读性下限；L3 @R_MAIN 70 恰 = 旧值 17/11，零回归。
+	var rr_big   := clampf(r * 0.2429, 14.0, 22.0)   # 旧 17/70 = 0.2429
+	var rr_small := rr_big / 1.545                    # 旧 17/11 = 1.545，比值必须锁死
 	for i in 4:
 		var ang := _t * 0.85 + TAU * float(i) / 4.0
 		var p := Vector2.RIGHT.rotated(ang) * (r * 1.37)
 		var cm: Color = Game.COLOR_MAIN[i]
-		var rr := 17.0 if i == ward else 11.0
+		var rr := rr_big if i == ward else rr_small
 		draw_circle(p, rr + 6.0, Color(Game.COLOR_GLOW[i].r, Game.COLOR_GLOW[i].g,
 			Game.COLOR_GLOW[i].b, 0.20))
 		draw_circle(p, rr, cm)
@@ -760,7 +769,7 @@ func _draw() -> void:
 		draw_circle(Vector2.ZERO, r * 0.63, Color(1.0, 0.90, 0.45, 0.20))
 
 	# L3 散热期：露出的内核必须一眼看得见 ——
-	#   否则玩家不知道「现在才该打」，×3.0 窗口就白给了。
+	#   否则玩家不知道「现在才该打」，高倍率窗口就白给了。
 	if venting:
 		draw_arc(Vector2.ZERO, r * 1.23, 0.0, TAU, 40,
 			Color(1.0, 0.55, 0.25, 0.80), 6.0, true)

@@ -15,7 +15,7 @@ const BODY := [
 	Vector2(-20.0, 0.0), Vector2(-14.0, 9.0), Vector2(6.0, 11.0),
 ]
 
-## 绕身本命光刃
+## 绕身随身光刃
 const SWORD := [
 	Vector2(7.0, 0.0), Vector2(0.0, -2.2), Vector2(-7.0, 0.0), Vector2(0.0, 2.2),
 ]
@@ -28,7 +28,7 @@ static func draw(ci: CanvasItem, pos: Vector2, c: int, t: float, s: float) -> vo
 	var dk: Color = Game.COLOR_DARK[c]
 	var pulse := 0.5 + 0.5 * sin(t * 3.0)
 
-	# 灵光外环
+	# 辉光外环
 	ci.draw_circle(pos, (58.0 + 6.0 * pulse) * s, Color(g.r, g.g, g.b, 0.10))
 	ci.draw_arc(pos, (48.0 + 4.0 * pulse) * s, 0.0, TAU, 40,
 		Color(m.r, m.g, m.b, 0.45), 2.5 * s, true)
@@ -46,7 +46,7 @@ static func draw(ci: CanvasItem, pos: Vector2, c: int, t: float, s: float) -> vo
 			Color(1.0, 1.0, 1.0, 0.80), 4.0 * s, true)
 		ci.draw_circle(pos, 62.0 * s, Color(0.95, 0.98, 1.0, 0.06))
 
-	# 引力束甲：绕身引力符（3 枚）
+	# 引力束甲：绕身引力环（4 枚）
 	if c == Game.YELLOW:
 		for i in 4:
 			var a := t * 1.1 + TAU * float(i) / 4.0

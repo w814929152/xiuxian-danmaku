@@ -18,6 +18,14 @@ extends RefCounted
 const DUR_FALLBACK := 3.2
 const TICK_FALLBACK := 0.60
 
+## 狂暴散热期结束的近距离冲击环（设计总纲 §D.3 原话：「散热期结束会喷一次
+## 近距离冲击环（半径 180），逼玩家打完就撤」）。
+## 伤害与 `EnemyCfg.MINE_DMG` 同为 12 是**刻意**的（主理人裁定：同族数值玩家
+## 已有直觉）；但不加保险期 —— 环是瞬发的，不像雷有「刚落地贴脸瞬爆」的问题。
+## 原在 Boss.gd，属 Boss 数值，故归位到本文件。
+const HEAT_BLAST_R := 180.0
+const HEAT_BLAST_DMG := 12
+
 # ============================ 技能池（设计 §D，逐条照抄）============================
 # L1 熔核号 · 2 阶段 · 换甲
 const _L1_P1 := ["fan_red", "aim_blue", "ring_white"]
@@ -26,7 +34,7 @@ const _L1_P2 := ["rain_red", "fan_yellow", "ring_white"]
 const _L2_P1 := ["ring_slow", "cross_ray"]
 const _L2_P2 := ["grid_rain_blue", "fan_blue", "ring_slow"]
 const _L2_P3 := ["spiral_wb", "cross_ray", "grid_rain_blue"]
-# L3 耀斑号 · 3 阶段 · 集火（常驻减伤 70% + 散热期 ×3.0 / ×4.0）
+# L3 耀斑号 · 3 阶段 · 集火（常驻减伤 70% + 散热期 ×1.8 / 狂暴 ×2.4，见 StageCfg.heat_mul）
 const _L3_P1 := ["fan_red", "ring_white"]
 const _L3_P2 := ["rain_yellow", "aim_white", "fan_red"]
 const _L3_P3 := ["chaos", "ring_white", "spiral_ry"]
@@ -51,7 +59,7 @@ const _L4_P3 := ["chaos", "spiral_ry", "grid_rain"]
 #     aim_white_6    白点射 · 6发速射                          [原名 aim_white = 5发]
 #     homing_white   追尾 · 3发 · 白弹（原 homing 取 ward 色 / 随机色）
 #     rain_yellow_3  黄雨 · 3发                                [原名 rain_yellow = 2发]
-#     mine_toss_y    黄雷 · 2枚 · 8s 自毁（BossMine.LIFE）
+#     mine_toss_y    黄雷 · 2枚 · 8s 自毁（EnemyCfg.MINE_LIFE）
 const _L5_P1 := ["fan_red_w", "rain_red_3", "spiral_rb"]
 # 相② 霜环·蓝 —— 三招全蓝（主色占比 3/3 ≥ 2/3）。
 #   顺序是设计定的：「把最蓝的两招放在玩家最先看到的位置，首招决定第一印象」。

@@ -179,13 +179,13 @@ func _values(s: int) -> Array[String]:
 static func _phase_cn(p: int) -> String:
 	match p:
 		2:
-			return "两重"
+			return "两阶段"
 		3:
-			return "三重"
+			return "三阶段"
 		4:
-			return "四重"
+			return "四阶段"
 		_:
-			return "%d 重" % p
+			return "%d 阶段" % p
 
 
 ## 属性护罩一行：无 / 全程 / 暴露期 / 常驻减伤（L3 无护罩但有常驻减伤）

@@ -22,7 +22,7 @@ extends RefCounted
 ##   · 可访问性（§E）：
 ##     - L3「常驻减伤暗甲壳弧」与「护罩弧」三处全反：DARK vs MAIN / 静止 vs 游走 / 断续 vs 连续；
 ##     - 狂暴不只有泛红光：L1 环缺口加大 + 加速、L2 翼尖霜刃、L4 触须红覆描、
-##       L5 残影 α 0.30→0.55 + 12 段血色虚线环（形状 / 明度通道）；
+##       L5 残影 α 0.30→0.45 + 12 段血色虚线环（形状 / 明度通道）；
 ##     - 狂暴另有 6 枚**三角**符标（vs 常态圆点），见 `Boss._draw()`（§E.2）；
 ##     - 所有周期性闪烁 ≤ 2Hz（A1 光敏安全）。
 ##   · ⚠️ 全绘制函数禁止出现 CANOPY 舱盖色 (0.62,0.86,0.98) —— 星盗没有驾驶舱。
@@ -59,8 +59,8 @@ const SIL_WING := [
 ]
 ## L3 耀斑号：长方形炮垒（纵向长，−X 舷留给一列炮塔）
 const SIL_BATTERY := [
-	Vector2(-0.78, -0.92), Vector2(0.42, -0.96), Vector2(0.76, -0.58),
-	Vector2(0.76, 0.58), Vector2(0.42, 0.96), Vector2(-0.78, 0.92),
+	Vector2(-0.646, -0.762), Vector2(0.348, -0.795), Vector2(0.630, -0.480),
+	Vector2(0.630, 0.480), Vector2(0.348, 0.795), Vector2(-0.646, 0.762),
 ]
 ## L4 深渊之喉：宽厚六边母舰（−X 侧开深渊之口）
 const SIL_MAW := [
@@ -408,7 +408,7 @@ static func draw_wing(b: Node2D, pulse: float) -> void:
 
 # ================================================================ L3 耀斑号 · 炮列
 ## −X 舷一列炮塔（4 / 6 / 8 门随阶段，中轴留空让开 CORE），炮管 NEUTRAL、炮口 GLOW。
-##   散热期：全部炮口喷 GLOW 焰 —— 与「甲壳缺口 + 白光」一起构成三重冗余。
+##   散热期：全部炮口喷 GLOW 焰 —— 与「甲壳缺口 + 白光」一起构成三层冗余。
 static func _l3_guns(b: Node2D, _pulse: float) -> void:
 	var r := r_main_of(b)
 	var c := boss_main_c(3)
@@ -422,7 +422,7 @@ static func _l3_guns(b: Node2D, _pulse: float) -> void:
 		n = 6
 	var half := n / 2
 	for j in half:
-		var off: float = (0.20 + 0.22 * float(j)) * r
+		var off: float = (0.17 + 0.16 * float(j)) * r
 		for k in 2:
 			var sg: float = -1.0 + 2.0 * float(k)
 			_turret(b, r, sg * off, g, vent)
@@ -430,7 +430,7 @@ static func _l3_guns(b: Node2D, _pulse: float) -> void:
 
 ## 单门炮塔：炮塔座 + 炮管 + 炮口（散热期喷焰）
 static func _turret(ci: Node2D, r: float, y: float, g: Color, vent: bool) -> void:
-	var bx := -0.78 * r
+	var bx := -0.646 * r
 	ci.draw_rect(Rect2(bx - r * 0.16, y - r * 0.055, r * 0.20, r * 0.11), NEUTRAL)
 	ci.draw_circle(Vector2(bx - r * 0.18, y), r * 0.055, Color(g.r, g.g, g.b, 0.95))
 	if vent:
@@ -486,8 +486,8 @@ static func draw_battery(b: Node2D, pulse: float) -> void:
 	_outline(b, sil, core_col(Game.WHITE), 3.0)
 	# ⑤ NEUTRAL 结构件 30%：横向装甲带 ×3
 	for i in 3:
-		var yy: float = (-0.55 + 0.55 * float(i)) * r
-		b.draw_rect(Rect2(-0.62 * r, yy, 1.28 * r, 0.07 * r), NEUTRAL)
+		var yy: float = (-0.456 + 0.456 * float(i)) * r
+		b.draw_rect(Rect2(-0.514 * r, yy, 1.060 * r, 0.07 * r), NEUTRAL)
 	# +X 推进舱（NEUTRAL 壳 + GLOW 焰心）
 	b.draw_rect(Rect2(0.60 * r, -0.28 * r, 0.28 * r, 0.56 * r), NEUTRAL)
 	b.draw_rect(Rect2(0.86 * r, -0.14 * r, 0.16 * r, 0.28 * r),
@@ -629,7 +629,8 @@ static func draw_maw(b: Node2D, pulse: float) -> void:
 ## ±Y 侧各一枚半透明相位残影：α0.30、**无 CORE**、呼吸滞后 0.18s
 ##   （同相位会读成「一个更厚的实体」，**必须滞后**才读成「影子」）。
 ##   残影数随四相重构 0 → 1 → 2 → 3（第 3 枚在 −X 侧，形成「三面围拢」）。
-##   狂暴：α 0.30 → 0.55（变实 = 威胁升级的明度通道）。
+##   狂暴：α 0.30 → 0.45（变实 = 威胁升级的明度通道；但残影外缘 196px 比狂暴圈 189px
+##     还大却无碰撞 / 无 CORE / 不受击，0.55 会把威胁感给到假目标，故压到 0.45 降视觉权重）。
 static func _l5_echoes(b: Node2D, _pulse: float) -> void:
 	var r := r_main_of(b)
 	var t := _gf(b, "_t", 0.0)
@@ -638,7 +639,7 @@ static func _l5_echoes(b: Node2D, _pulse: float) -> void:
 	var n := clampi(ph - 1, 0, 3)
 	if n <= 0:
 		return
-	var alpha := 0.55 if rage else 0.30
+	var alpha := 0.45 if rage else 0.30
 	for i in n:
 		var off := Vector2.ZERO
 		if i == 0:

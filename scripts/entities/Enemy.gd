@@ -29,6 +29,9 @@ var _mine: bool = false
 var _ward_window: float = 0.0
 ## 相位者无敌剩余（>0 时不受伤害）
 var _phase_invuln: float = 0.0
+## 增殖指挥将召唤的增援标记（阻塞清场、可掉落；由 EliteSwarm 置位，
+## 用于硬闸计数与「母舰回血」联动，不复用 _shard / _mine 语义）
+var _reinforce: bool = false
 ## 独有怪周期机制节拍器（变节者换色 / 相位者折跃）；不复用 _fire（那是开火冷却）
 var _brain_timer: float = 0.0
 
@@ -47,10 +50,23 @@ var dead := false
 var _phase := randf() * TAU
 
 
-func setup(c: int, pat: String, y: float, hp_scale: float = 1.0) -> void:
+## [param warp_x] 入场横坐标：**< 0 = 常规右侧屏外飞入**（唯一的历史行为）；
+##   ≥ 0 = **屏内跃迁入场**（驻留阵地波用）—— 直接落在屏内该 x 上，配一圈跃迁环 +
+##   一记白闪当作「来处提示」（提案 `design/levels/03-...驻留波提案.md` §3.1）。
+##   ⚠ 用「x 值」而不是 bool：列阵者 1 格 = 3 艘成竖墙，**整组必须共用同一个 x**，
+##   各自随机会把墙拆散（见 `Level._spawn_slot`）。
+func setup(c: int, pat: String, y: float, hp_scale: float = 1.0,
+		warp_x: float = -1.0) -> void:
 	color = c
 	pattern = pat
 	position = Vector2(Game.VIEW_W + 70.0, y)
+	if warp_x >= 0.0:
+		position.x = warp_x
+		# 不硬"凭空出现"：先落一发跃迁环再实体化，玩家有一帧可读的来处。
+		# 开火仍有天然宽限 —— `_fire` 初值 0.7~1.5s，落地那一刻打不出来。
+		if world != null:
+			Fx.ring(world, position, Game.COLOR_GLOW[c], 10.0, 62.0, 0.42, 5.0)
+		_flash = 0.28
 	_base_y = y
 	# 按颜色做差异化
 	match c:
@@ -79,6 +95,7 @@ func setup(c: int, pat: String, y: float, hp_scale: float = 1.0) -> void:
 	_mine = false
 	_ward_window = 0.0
 	_phase_invuln = 0.0
+	_reinforce = false
 	_brain_timer = 0.0
 	# 碰撞半径维持 r19（EnemyKind 未提供 radius_of；art 规格允许零改动全 r19，
 	# 识别度主要来自 PirateArt 的器官绘制，不靠碰撞尺寸）

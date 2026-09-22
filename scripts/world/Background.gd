@@ -17,7 +17,18 @@ const STAR_PERIOD := 1024.0 # 星野循环周期（屏幕像素）
 const NEB_PERIOD := 2048.0  # 星云循环周期（屏幕像素，最慢视差）
 const OVAL_SEG := 24        # 尘埃云带椭圆分段
 
-var scroll_speed := 46.0
+## 三档滚动速度（2026-09-22 收成常量 —— 原来 46 / 22 散落在 Background 初值与
+##   Level 的 Boss 战分支里，加驻留波时若不收拢就会出现第三个裸数字）：
+##   · NORMAL 推进波（现状恒速）
+##   · BOSS   Boss 战（已有自己的慢滚，是第三种节奏，不用再改）
+##   · HOLD   驻留阵地波（提案 `design/levels/03-关卡节奏实测与驻留波提案.md` §3.4）
+##     ⚠ **不降成硬 0**：`_off` 同时驱动星野 / 星云 / 小行星带，只有漂浮碎屑走
+##     `_t` 仍在动，硬 0 会让画面整个"死"掉看着像卡住。8 px/s 保留一点漂移感。
+const SCROLL_NORMAL := 46.0
+const SCROLL_BOSS := 22.0
+const SCROLL_HOLD := 8.0
+
+var scroll_speed := SCROLL_NORMAL
 var _t := 0.0
 var _off := 0.0
 
@@ -32,7 +43,7 @@ var _cloud_a: Array[float] = []
 var _cloud_s: Array[float] = []
 var _stars: Array[Vector2] = []     # 逐颗明灭的亮星（少量，保留呼吸感）
 var _srad: Array[float] = []
-var _motes: Array[Vector2] = []     # 灵气
+var _motes: Array[Vector2] = []     # 浮尘
 var _mph: Array[float] = []
 
 

@@ -36,7 +36,7 @@ static func _take(parent: Node) -> Fx:
 
 func _ready() -> void:
 	z_index = 30
-	# 消散灵气走像素 sprite，NEAREST 保证缩放时像素边缘不糊
+	# 消散粒子走像素 sprite，NEAREST 保证缩放时像素边缘不糊
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 
@@ -126,7 +126,7 @@ func _draw() -> void:
 	var a: float = 1.0 - k
 	match kind:
 		K.BURST:
-			# 消散灵气：白模像素 sprite，modulate 染成来色，随时间放大 + 淡出
+			# 消散粒子：白模像素 sprite，modulate 染成来色，随时间放大 + 淡出
 			var tex := ArtAssets.tex("fx_burst")
 			if tex != null:
 				var rr := 0.0

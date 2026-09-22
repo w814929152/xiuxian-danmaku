@@ -12,19 +12,19 @@ extends Node2D
 ##   目标色 ∈ S（玩家两件战甲色，逼换甲）· 骚扰色 ∈ S'（补集，逼走位，恒 hover）
 ##   · 禁连续 ≥3 同色（第 1 关第 1 波教学波豁免；列阵组内豁免，见 `_fold_groups`）
 ## 独有怪**不自带随机色**：色由本文件统一从 S / S' 分配 —— 与 Elite / Boss 同一条设计原则。
+##
+## 关卡形式两种（提案 `design/levels/03-关卡节奏实测与驻留波提案.md` §3）：
+##   · **推进波** —— 背景恒滚 `Background.SCROLL_NORMAL`，敌从右侧屏外飞入
+##   · **驻留阵地波** —— 背景降到 `Background.SCROLL_HOLD`，敌屏内跃迁入场
+##     （位表 `StageCfg.wave_hold`，每关 1~2 波、不碰第 1 波）
+## 两者共用同一张波次表与同一段清场判定 —— 只换**空间形式**，不动数值。
 
 ## 关卡结束（胜 / 负）—— 由 Main 连接，Level 不反向找 Main
 signal finished(win: bool)
 ## 玩家请求重来本关（转发自 HUD）
 signal restart_requested()
 
-## 单色连长上限：允许 2 连，禁止连续 ≥3 同色。
-## （第 1 关第 1 波是刻意的一色到底 —— 教换甲的教学波，不受此限。）
-const MAX_RUN := 2
-
-## 每波星袭结束后额外刷新的道具数（五关恒为 1，与 `StageCfg.wave_drop(s)` 同值）。
-## 保留本常量：既有自测（SelfTest 502-503）按它断言，删了会把门禁打红。
-const WAVE_DROP := 1
+## 单色连长上限 / 每波刷新道具数取自 StageCfg（StageCfg.MAX_RUN / wave_drop）。
 
 ## 关卡号 1..5 —— 由 Main 在 `add_child` **之前**注入（_ready 里就 _start，晚一步就打错关）
 var stage: int = 1
@@ -42,6 +42,9 @@ var _running: bool = false
 var _harass: Array[int] = []
 ## 独有怪首登横幅是否已放过（每关只放一次，时长 2.2s 用于教学）
 var _uniq_intro := false
+## 本关已出战的战将序号（0-based）—— 传给 `Elite.setup` 做**同关多只战将强制异色**。
+## L3 / L4 / L5 各有两只战将；不编号就只能随机，约半数局两只同色、一甲打穿两场。
+var _elite_seq := 0
 
 
 func _ready() -> void:
@@ -97,12 +100,12 @@ func _run() -> void:
 			await wait(0.7)
 			if not _running:
 				return
-		await _wave(n, StageCfg.wave_hp_scale(stage, n), StageCfg.wave_elite(stage, n))
+		await _wave(n, StageCfg.wave_hp_scale(stage, n), StageCfg.wave_elite_type(stage, n))
 		if not _running:
 			return
 		_drop_wave()
 	var sub := "四色弹幕 + 属性护罩，破罩方能致胜" if StageCfg.boss_ward(stage) \
-		else "四色弹幕 · 始祖不展护罩，全力输出即可"
+		else "四色弹幕 · 旗舰不展护罩，全力输出即可"
 	hud.show_banner(StageCfg.boss_full_name(stage), sub, 2.4)
 	await wait(0.9)
 	if not _running:
@@ -113,8 +116,13 @@ func _run() -> void:
 ## 本波横幅：[标题, 副标题, 时长(秒)]
 ## 第 1 波点名报出本波主色与对应的那件战甲，把「换甲」教在第一次遭遇上；
 ## 独有怪首登那一波改报它的机制（2.2s，比常规 1.0s 长，留足教学时间）。
+##
+## 驻留阵地波：优先让位给「独有怪首登 / 战将压轴」这两条**教学与破罩提示**，
+## 只在副标题里补一句「跃迁入场」—— 玩家真正要知道的是「敌会从屏内冒出来」，
+## 一句话足够，为它盖掉「换甲破力场」这种硬提示不划算。
 func _wave_banner(n: int) -> Array[String]:
 	var out: Array[String] = []
+	var hold := StageCfg.wave_hold(stage, n)
 	if n <= 1:
 		var t1: int = player.armors[1] if player.armors.size() > 1 else Game.WHITE
 		out.append("%s · 第 一 波" % StageCfg.name_of(stage))
@@ -127,18 +135,38 @@ func _wave_banner(n: int) -> Array[String]:
 		if StageCfg.wave_unique_a(stage, n) <= 0:
 			k = StageCfg.unique_kind_b(stage)
 		out.append(EnemyKind.short_cn(k))
-		out.append(_uniq_tip(k))
+		out.append(_uniq_tip(k) + (" · 跃迁入场，就地清场" if hold else ""))
 		out.append("2.2")
 		return out
 	if StageCfg.wave_elite(stage, n):
 		out.append("第 %d 波 · 先锋" % n)
-		out.append("星盗战将至 · 换上同色战甲破其力场")
+		out.append(("星盗跃迁入场 · " if hold else "") + _elite_pre_tip(StageCfg.wave_elite_type(stage, n)))
+		out.append("1.0")
+		return out
+	if hold:
+		out.append("第 %d 波 · 驻留" % n)
+		out.append("星盗跃迁入场 · 清完本波方能推进")
 		out.append("1.0")
 		return out
 	out.append("第 %d 波 · 星袭" % n)
 	out.append("同色光刃伤害 + 50% · 异色敌只能硬躲")
 	out.append("1.0")
 	return out
+
+
+## 精英波横幅的一句话预告（按种类；战将沿用「破力场」提示）
+static func _elite_pre_tip(elite_type: int) -> String:
+	match elite_type:
+		EnemyKind.E.WARRIOR:
+			return "战将至 · 换上同色战甲破其力场"
+		EnemyKind.E.BASTION:
+			return "弹幕堡垒将至 · 跟弹幕墙的缝隙走位"
+		EnemyKind.E.SWARM:
+			return "增殖指挥将至 · 先清召唤喽啰再打本体"
+		EnemyKind.E.AEGIS:
+			return "护盾冲锋将至 · 绕到侧后或换同色甲破盾"
+		_:
+			return "星盗精锐 · 破其色防"
 
 
 ## 独有怪首登的一句话机制提示（设计 §C 各条「唯一机制」）
@@ -272,7 +300,7 @@ static func _wave_colors(n: int, armors: Array[int], h2: int, h3: int,
 		# 奇数波：目标色在两色间摆动，允许 2 连、禁止连续 ≥3 同色 —— 得自己判断何时换
 		var half := n_s / 2
 		var ca := half if randf() < 0.5 else n_s - half
-		seq = _alt_fill(a, b, ca, n_s - ca, MAX_RUN)
+		seq = _alt_fill(a, b, ca, n_s - ca, StageCfg.MAX_RUN)
 	return _insert_harass(seq, h, _harass_slots(st, n))
 
 
@@ -411,7 +439,7 @@ static func _alt_fill(a: int, b: int, ca: int, cb: int, max_run: int) -> Array[i
 
 
 ## 把 count 只骚扰色插进已合规的目标色序列，位置随机，但插进去会让骚扰色
-## 连长超过 MAX_RUN 的空位直接跳过。
+## 连长超过 StageCfg.MAX_RUN 的空位直接跳过。
 ## 注意不能只判「左右都是 h」：已有 HH 时往它左侧插一格，左边是别的色、
 ## 右边是单个 H，照样凑出 HHH —— 得把插入点左右的连长都算进去。
 static func _insert_harass(seq: Array[int], h: int, count: int) -> Array[int]:
@@ -428,7 +456,7 @@ static func _insert_harass(seq: Array[int], h: int, count: int) -> Array[int]:
 			while j < seq.size() and seq[j] == h:
 				rrun += 1
 				j += 1
-			if lrun + 1 + rrun > MAX_RUN:
+			if lrun + 1 + rrun > StageCfg.MAX_RUN:
 				continue
 			spots.append(p)
 		if spots.is_empty():
@@ -437,9 +465,17 @@ static func _insert_harass(seq: Array[int], h: int, count: int) -> Array[int]:
 	return seq
 
 
-## [param elite] 本波是否以【星盗战将】压轴
-func _wave(n: int, scale: float, elite := false) -> void:
-	_set_wave("第 %d 波 · 星袭" % n)
+## [param elite_type] 本波压轴精英的种类（EnemyKind.E；0 = 本波无精英）。
+##   战将（WARRIOR）力场色由 Elite 自己从玩家战甲里抽；其余种类由 _spawn_elite 分派。
+##
+## **驻留阵地波**（`StageCfg.wave_hold`）：背景降到 `Background.SCROLL_HOLD`、
+## 敌人改走屏内跃迁入场（`_spawn_slot` 的 warp 分支）。清场判定与推进波**完全同一段**，
+## 一行未改 —— 提案 §3.1 的硬要求：只换「空间形式」，不动血量 / 弹幕 / 配色 / 计分。
+func _wave(n: int, scale: float, elite_type := 0) -> void:
+	var hold := StageCfg.wave_hold(stage, n)
+	if bg != null:
+		bg.scroll_speed = Background.SCROLL_HOLD if hold else Background.SCROLL_NORMAL
+	_set_wave("第 %d 波 · %s" % [n, "驻留" if hold else "星袭"])
 	if _harass.size() < 2:
 		_plan_harass()
 	var harass := _harass_of(n, _harass[0], _harass[1])
@@ -447,7 +483,7 @@ func _wave(n: int, scale: float, elite := false) -> void:
 	var kinds := _wave_kinds(colors, harass, n, stage)
 	# 列阵组折叠：展开成 3 艘之前先校验（组内豁免），否则一列阵就会被判违规。
 	# 第 1 关第 1 波是教学波，整波一色到底，不在约束内。
-	if (n > 1 or stage > 1) and _max_run(_fold_groups(colors, kinds)) > MAX_RUN:
+	if (n > 1 or stage > 1) and _max_run(_fold_groups(colors, kinds)) > StageCfg.MAX_RUN:
 		push_warning("Level: 第 %d 关第 %d 波色序出现连续 %d 同色（已折叠列阵组）" % [
 			stage, n, _max_run(_fold_groups(colors, kinds))
 		])
@@ -456,22 +492,28 @@ func _wave(n: int, scale: float, elite := false) -> void:
 	for i in colors.size():
 		if not _running:
 			return
-		_spawn_slot(scale, colors[i], kinds[i], harass, pats)
+		_spawn_slot(scale, colors[i], kinds[i], harass, pats, hold)
 		await wait(gap)
-	if elite:
+	if elite_type != 0:
 		await wait(0.5)
 		if not _running:
 			return
-		_spawn_elite(scale)
-	# 等待清场。战将是硬性门槛 —— 星盗可以剩最后一只不等，战将没斩就别想进下一波。
+		_spawn_elite(scale, elite_type)
+	# 等待清场。精英是硬性门槛 —— 星盗可以剩最后一只不等，精英没斩就别想进下一波。
 	# 上限按 `StageCfg.clear_guard(stage, elite)` 取：各关只数不同，写死会卡在半路。
-	var limit := StageCfg.clear_guard(stage, elite)
+	var has_elite := elite_type != 0
+	var limit := StageCfg.clear_guard(stage, has_elite)
 	var guard := 0.0
 	while _running and guard < limit:
 		await wait(0.3)
 		guard += 0.3
 		if _enemy_count() <= 1 and not _elite_alive():
 			break
+	# 驻留波结束 -> 背景恢复推进速度（下一波 / Boss 自己会再设，这里是兜底）。
+	#   ⚠ 不走这条的提前 return 都是「关卡已终止」（玩家阵亡 / 通关），那时滚速由
+	#     `_stop_field` 接管，不能被这里覆盖回 46。
+	if bg != null:
+		bg.scroll_speed = Background.SCROLL_NORMAL
 
 
 ## 出怪唯一入口 —— 一律走 `Spawner.enemy(...)`（world 显式注入，禁用 get_parent）。
@@ -480,16 +522,22 @@ func _wave(n: int, scale: float, elite := false) -> void:
 ## [param harass] 本波骚扰色；c == harass 时强制 hover（远驻放弹、不追击），
 ##                harass < 0 表示本波没有骚扰色
 ## [param pats] 本波目标色的运动模式池（骚扰色不走这里）
+## [param warp] 屏内跃迁入场（驻留阵地波）；列阵者整组共用同一个 x，见下方
 func _spawn_slot(scale: float, c: int, kind: int, harass: int,
-		pats: Array[String]) -> void:
+		pats: Array[String], warp := false) -> void:
 	var pat := "hover"
 	if c != harass:
 		pat = pats[randi() % pats.size()]
 	var y := randf() * (Game.VIEW_H - 180.0) + 90.0
 	var ships := _ships_of(kind)
+	# 跃迁 x 取屏宽 55%~95%：够靠右（不糊在玩家脸上），又留得出反应距离。
+	# **一格算一次** —— 列阵者 3 艘成竖墙，各自随机会把墙拆散。
+	var wx := -1.0
+	if warp:
+		wx = Game.VIEW_W * (0.55 + randf() * 0.40)
 	for i in ships:
 		var yy := clampf(y + _ship_off(i, ships), 90.0, Game.VIEW_H - 90.0)
-		var e := Spawner.enemy(self, kind, c, pat, yy, scale, stage)
+		var e := Spawner.enemy(self, kind, c, pat, yy, scale, stage, wx)
 		if e == null:
 			return
 		e.player_ref = player
@@ -514,26 +562,86 @@ func _enemy_count() -> int:
 	return n
 
 
-## 场上是否还有活着的星盗战将（清场判定用）
+## 场上是否还有活着的精英（战将 / 堡垒 / 指挥 / 护盾，清场判定用）。
+## 四只精英都继承 EliteBase —— 一律认 `ch is EliteBase`。
 func _elite_alive() -> bool:
 	for ch in get_children():
-		if ch is Elite and not (ch as Elite).dead:
+		if ch is EliteBase and not (ch as EliteBase).dead:
 			return true
 	return false
 
 
-## 压轴：星盗战将。力场色由 Elite 自己从玩家战甲里抽 —— 保证一定破得了
-func _spawn_elite(scale: float) -> void:
-	var e := Elite.new()
+## 压轴精英：按 `elite_type`（EnemyKind.E）分派到具体子类。
+## 四只精英机制完全不同（破罩 / 弹幕墙 / 召唤 / 朝向护盾），各自成类；
+## 这里只做「new → 注入 world/stage/player → setup → 连 killed」的统一编排。
+## 力场/护盾色（战将、护盾）由各子类自己从 player_armors 抽 —— 保证一定破得了。
+func _spawn_elite(scale: float, elite_type: int) -> void:
+	var e: EliteBase = _make_elite(elite_type)
+	if e == null:
+		return
 	e.stage = stage                     # ★ add_child 之前注入（与 Spawner.enemy 同一口径）
 	e.world = self
 	add_child(e)
 	e.player_ref = player
 	e.player_armors = player.armors
-	e.setup(scale, randf() * (Game.VIEW_H - 300.0) + 150.0)
+	# 战将传本关出场序号（两只按序号各取 S 的一色，强制异色）；其余种类忽略 seq
+	if elite_type == EnemyKind.E.WARRIOR:
+		(e as Elite).setup(scale, randf() * (Game.VIEW_H - 300.0) + 150.0, _elite_seq)
+		_elite_seq += 1
+	else:
+		e.setup(scale, randf() * (Game.VIEW_H - 300.0) + 150.0)
 	e.killed.connect(_on_elite_killed)
-	hud.show_banner("星 盗 战 将",
-		"身披【%s】力场 —— 换上同色战甲方能速破" % Game.COLOR_CN[e.color], 2.2)
+	hud.show_banner(_elite_banner_name(elite_type), _elite_tip(elite_type, e.color), 2.2)
+
+
+## 按种类 new 出对应精英实例（探测不到就返回 null —— 前向兼容，日后加子类自动接上）
+func _make_elite(elite_type: int) -> EliteBase:
+	match elite_type:
+		EnemyKind.E.WARRIOR:
+			return Elite.new()
+		EnemyKind.E.BASTION:
+			return EliteBastion.new()
+		EnemyKind.E.SWARM:
+			return EliteSwarm.new()
+		EnemyKind.E.AEGIS:
+			return EliteAegis.new()
+		_:
+			return null
+	return null
+
+
+## 精英横幅标题（种类名）
+func _elite_banner_name(elite_type: int) -> String:
+	match elite_type:
+		EnemyKind.E.WARRIOR:
+			return "星 盗 战 将"
+		EnemyKind.E.BASTION:
+			return "弹 幕 堡 垒"
+		EnemyKind.E.SWARM:
+			return "增 殖 指 挥"
+		EnemyKind.E.AEGIS:
+			return "护 盾 冲 锋"
+		_:
+			return "星 盗 精 锐"
+
+
+## 精英横幅副标题（一句话机制提示 + 配色提示）
+func _elite_tip(elite_type: int, c: int) -> String:
+	var col := "【%s】" % Game.COLOR_CN[c]
+	match elite_type:
+		EnemyKind.E.WARRIOR:
+			var t := "身披 %s 力场 —— 换上同色战甲方能速破" % col
+			if StageCfg.elite_hue_n(stage) > 1:
+				t += " · 弹幕混色，异色唯有走位"
+			return t
+		EnemyKind.E.BASTION:
+			return "厚甲无罩 · 弹幕织墙，跟缝隙走位 · 主色 %s 可吸" % col
+		EnemyKind.E.SWARM:
+			return "周期性召唤 %s 喽啰 · 先清场再打本体" % col
+		EnemyKind.E.AEGIS:
+			return "正面 %s 护盾 · 绕到侧后或换同色甲破之" % col
+		_:
+			return "星盗精锐 · 破其色防"
 
 
 ## 斩战将：厚赏 + 必掉一件道具（斩它是有代价的，不能让人空手）
@@ -581,7 +689,7 @@ static func _make_boss(st: int) -> Boss:
 
 func _boss_fight() -> void:
 	_set_wave(StageCfg.boss_name(stage))
-	bg.scroll_speed = 22.0
+	bg.scroll_speed = Background.SCROLL_BOSS
 	boss = _make_boss(stage)
 	boss.world = self
 	boss.stage = stage                                   # ★ 必须在 add_child 之前
@@ -596,18 +704,18 @@ func _boss_fight() -> void:
 	boss.boss_died.connect(_on_boss_died)
 	hud.bind_boss(boss)
 	var sub := "四色弹幕 + 属性护罩，破罩方能致胜" if StageCfg.boss_ward(stage) \
-		else "四色弹幕 · 始祖不展护罩，全力输出即可"
+		else "四色弹幕 · 旗舰不展护罩，全力输出即可"
 	hud.show_banner(StageCfg.boss_full_name(stage), sub, 2.4)
 
 
 func _on_enrage() -> void:
-	hud.show_banner("狂 暴", "%s 周身泛起血光 · 攻势全面升级" % StageCfg.boss_name(stage),
+	hud.show_banner("狂 暴", "%s 周身泛起赤光 · 攻势全面升级" % StageCfg.boss_name(stage),
 		1.8)
 
 
 func _on_boss_phase(p: int) -> void:
 	_add_score(600)
-	hud.show_banner("第 %d 阶段" % p, "始祖切换阶段，弹幕更急", 1.6)
+	hud.show_banner("第 %d 阶段" % p, "旗舰切换阶段，弹幕更急", 1.6)
 
 
 func _on_ward(c: int) -> void:
@@ -643,13 +751,14 @@ func _stop_field() -> void:
 			(ch as Danmaku).dissolve()
 		elif ch is Enemy:
 			(ch as Enemy).queue_free()
-		elif ch is Elite:
-			(ch as Elite).queue_free()
+		elif ch is EliteBase:
+			(ch as EliteBase).queue_free()
 		elif ch is Pickup:
 			(ch as Pickup).queue_free()
 	if boss != null and is_instance_valid(boss):
 		boss.player_ref = null
 		boss.stand_down()
+	# 阵亡慢镜：比驻留波（8 px/s）还慢一档，是「画面濒死」的表演，别与 SCROLL_HOLD 混用
 	if bg != null:
 		bg.scroll_speed = 6.0
 
