@@ -23,7 +23,8 @@ const _CN := ["red", "blue", "white", "yellow"]
 const FILES: Dictionary[String, String] = {
 	# 杂兵 / 精英 / Boss 全部回滚为矢量绘制（scripts/art/PirateArt.gd 与 Boss._draw），
 	# 不再引用 enemy_* / elite_* / boss 像素 PNG；文件仍保留在 assets/sprites/ 供追溯。
-	# 弹幕：四色同形白模弹丸（24×24），使用处 modulate 染成属性色。
+	# 弹幕：四色同形「灵纹能量珠」白模（24×24，tools/build_danmaku.py 程序化烘焙），
+	# 使用处 modulate 染成属性色。
 	# （曾用四色异形图 danmaku_{red,blue,white,yellow}.png，形状各异导致弹幕高峰画面杂乱，
 	#   已回退白模；四张异形图仍留在 assets/sprites/ 未删，需要时可比对。）
 	"danmaku": "danmaku.png",
