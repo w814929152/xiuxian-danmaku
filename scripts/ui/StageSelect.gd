@@ -5,6 +5,11 @@ extends Node2D
 ## 版式与锁态照 `design/art/01-五关视觉差异化规格.md` §I（v3 生效版）：
 ##   卡宽 216 / 中心间距 232 / 高 396 / 顶边 y176；总跨度 1144，左右各留 68。
 ##
+## §I.1 v5 修订（主理人裁定）：卡面**唯一一处位图** —— 顶部 Boss 主视觉插图
+##   （184×104，`assets/sprites/boss_card_l{1..5}.png`）。其余全部维持矢量绘制。
+##   插图挤进卡面靠「下方元素整体下移 56px」腾位，不改卡宽 / 卡高 / 间距。
+##   锁态换去色版（`_lock` 后缀），与「去色即锁」同一条规则（§I.3）。
+##
 ## 锁态**不用「整卡 alpha 0.35」** —— 深底上那样会让 5 张卡不再读成一排、
 ## 关键文字对比掉到 1.5:1。改用「去色 + 斜封条 + 锁形 + 占位行」四件套，
 ## 锁态有**形状（斜封条 + 锁形）+ 文字（未解锁 / 通关第 N-1 关开启）**两条冗余通道，
@@ -20,6 +25,29 @@ const CARD_W := 216.0
 const CARD_H := 396.0
 const CARD_GAP := 232.0
 const CARD_TOP := 176.0
+
+# ---------------- 卡面 Boss 插图（§I.1 v5）----------------
+## 画在色带下方 4px，宽占满卡面内容区（x0+16 → x0+200）
+const ART_W := 184.0
+const ART_H := 104.0
+const ART_TOP := 14.0
+## 关号徽章 / 锁形挪到插图左上角（原居中 y210 → 插图内，仍读「第几关」）
+const BADGE_OFF := Vector2(38.0, 36.0)
+## 解锁态 / 锁态两套图：后者是同图的灰度去色版（去色即锁）
+const BOSS_TEX: Array[Texture2D] = [
+	preload("res://assets/sprites/boss_card_l1.png"),
+	preload("res://assets/sprites/boss_card_l2.png"),
+	preload("res://assets/sprites/boss_card_l3.png"),
+	preload("res://assets/sprites/boss_card_l4.png"),
+	preload("res://assets/sprites/boss_card_l5.png"),
+]
+const BOSS_TEX_LOCK: Array[Texture2D] = [
+	preload("res://assets/sprites/boss_card_l1_lock.png"),
+	preload("res://assets/sprites/boss_card_l2_lock.png"),
+	preload("res://assets/sprites/boss_card_l3_lock.png"),
+	preload("res://assets/sprites/boss_card_l4_lock.png"),
+	preload("res://assets/sprites/boss_card_l5_lock.png"),
+]
 
 # ---------------- 卡面配色 ----------------
 ## 五张卡的强调色（§I.2）：刻意避开 COLOR_MAIN 的四值 ——
@@ -258,53 +286,58 @@ func _draw_card(i: int) -> void:
 	# 顶部色带
 	draw_rect(Rect2(x0, rr.position.y, rr.size.x, 10.0), ac)
 
-	# 关号徽章 / 锁形（纯几何、零素材）
+	# Boss 主视觉插图（锁态自动换去色版 —— 形状 / 文字之外再补一条去色通道）
+	draw_texture_rect(BOSS_TEX[i] if un else BOSS_TEX_LOCK[i],
+		Rect2(x0 + 16.0, rr.position.y + ART_TOP, ART_W, ART_H), false)
+
+	# 关号徽章 / 锁形（纯几何、零素材）—— 叠在插图左上角
+	var bp := rr.position + BADGE_OFF
 	if un:
-		draw_circle(Vector2(cx, 210.0), 22.0, Color(ac.r, ac.g, ac.b, 0.22))
-		DrawUtil.txt(self, str(s), Vector2(cx, 218.0), 24,
+		draw_circle(bp, 22.0, Color(ac.r, ac.g, ac.b, 0.22))
+		DrawUtil.txt(self, str(s), bp + Vector2(0.0, 8.0), 24,
 			Color(1.0, 1.0, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
 	else:
-		_draw_lock(Vector2(cx, 210.0))
+		_draw_lock(bp)
 
 	# 关卡名 / 副标题
-	DrawUtil.txt(self, StageCfg.name_of(s), Vector2(cx, 252.0), 20,
+	DrawUtil.txt(self, StageCfg.name_of(s), Vector2(cx, 308.0), 20,
 		Color(0.95, 0.96, 1.00) if un else LOCK_NAME, HORIZONTAL_ALIGNMENT_CENTER)
 	var sub: String = StageCfg.sub_of(s) if un else "通关第 %d 关开启" % (s - 1)
-	DrawUtil.txt(self, sub, Vector2(cx, 274.0), 12,
+	DrawUtil.txt(self, sub, Vector2(cx, 330.0), 12,
 		Color(0.68, 0.73, 0.90) if un else Color(0.62, 0.66, 0.78),
 		HORIZONTAL_ALIGNMENT_CENTER)
 
-	draw_rect(Rect2(x0 + 16.0, 290.0, rr.size.x - 32.0, 1.0), CARD_LINE)
+	draw_rect(Rect2(x0 + 16.0, 346.0, rr.size.x - 32.0, 1.0), CARD_LINE)
 
 	# 最高分 + 完成度（品阶已改为每关独立完成度，故必须就地自解释）
 	var best := Game.stage_highscore(s)
 	if un:
 		var hs: String = "最高 %s" % (str(best) if best > 0 else "—")
-		DrawUtil.txt(self, hs, Vector2(x0 + 16.0, 312.0), 13,
+		DrawUtil.txt(self, hs, Vector2(x0 + 16.0, 368.0), 13,
 			Color(0.98, 0.88, 0.55) if best > 0 else Color(0.58, 0.62, 0.75))
 		var pc: String = "完成度 %d%%" % int(roundf(Game.completion_of(best, s) * 100.0)) \
 			if best > 0 else "完成度 —"
-		DrawUtil.txt(self, pc, Vector2(x0 + rr.size.x - 16.0, 312.0), 12,
+		DrawUtil.txt(self, pc, Vector2(x0 + rr.size.x - 16.0, 368.0), 12,
 			Color(0.80, 0.85, 1.00), HORIZONTAL_ALIGNMENT_RIGHT)
 	else:
-		DrawUtil.txt(self, "最高 — — —", Vector2(x0 + 16.0, 312.0), 13, LOCK_PLACE)
+		DrawUtil.txt(self, "最高 — — —", Vector2(x0 + 16.0, 368.0), 13, LOCK_PLACE)
 
 	# 独有怪 / 首领
 	if un:
-		DrawUtil.txt(self, _uniq_cn(s), Vector2(x0 + 16.0, 334.0), 13,
+		DrawUtil.txt(self, _uniq_cn(s), Vector2(x0 + 16.0, 390.0), 13,
 			Color(0.80, 0.85, 1.00))
 	else:
-		DrawUtil.txt(self, "独有 — — —", Vector2(x0 + 16.0, 334.0), 13, LOCK_PLACE)
+		DrawUtil.txt(self, "独有 — — —", Vector2(x0 + 16.0, 390.0), 13, LOCK_PLACE)
 	DrawUtil.txt(self, "首领 · %s" % StageCfg.boss_full_name(s),
-		Vector2(x0 + 16.0, 356.0), 13, ac)
+		Vector2(x0 + 16.0, 412.0), 13, ac)
 
-	draw_rect(Rect2(x0 + 16.0, 372.0, rr.size.x - 32.0, 1.0), CARD_LINE)
+	draw_rect(Rect2(x0 + 16.0, 428.0, rr.size.x - 32.0, 1.0), CARD_LINE)
 
 	# 5 行参数（标签左 / 数值右）—— 锁态不隐藏，改占位行，保证 5 张卡等高、版式一致
 	var labels := _labels()
 	var vals := _values(s)
 	for j in labels.size():
-		var y := 392.0 + float(j) * 22.0
+		var y := 448.0 + float(j) * 22.0
 		DrawUtil.txt(self, str(labels[j]), Vector2(x0 + 16.0, y), 12,
 			Color(0.62, 0.67, 0.82) if un else LOCK_VAL)
 		var v: String = str(vals[j]) if un else "— — —"
@@ -312,7 +345,7 @@ func _draw_card(i: int) -> void:
 			Color(0.88, 0.91, 1.00) if un else LOCK_PLACE,
 			HORIZONTAL_ALIGNMENT_RIGHT)
 
-	DrawUtil.txt(self, "按 %d 键" % s, Vector2(cx, 540.0), 12,
+	DrawUtil.txt(self, "按 %d 键" % s, Vector2(cx, 552.0), 12,
 		ac if act else Color(0.55, 0.60, 0.75), HORIZONTAL_ALIGNMENT_CENTER)
 
 	# 斜封条画在最上层（锁态主视觉：形状 + 文字）
