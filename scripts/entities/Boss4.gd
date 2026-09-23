@@ -123,6 +123,16 @@ var _rage_force_t := 0.0
 ##   这里**不得重复声明**（GDScript 不允许子类重名成员），直接复用基类的。
 
 
+## **公开派生量：子核心暴露期**（02 §7.2 缓解口径）。
+##   三个绘制层（⑥ 机库牵引闸门 / ⑦c 能量索 / ⑨ 护罩弧）**都读这一个布尔量**，
+##   而不是各自从 `_cores.is_empty()` 推 —— 后者会让「闸门关了但护罩没开」
+##   「能量索还在但护罩已开」这类传达**互斥玩法信息**的帧出现（打子核心 vs 换甲破罩）。
+##   `BossArt` 不 import `Boss4`（循环依赖），走 `Object.has_method()` + `Object.call()` 读它，
+##   读不到就降级读基类字段 `_exposed_win`，再读不到按「非暴露期」画基础形态，不会崩绘制。
+func is_exposed() -> bool:
+	return _exposed_win
+
+
 func _ready() -> void:
 	super._ready()
 	# 只在 EXPOSED 模式（L4）启用子核心；其它关号万一走到这里也不误开

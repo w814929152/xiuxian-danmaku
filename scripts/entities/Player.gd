@@ -570,12 +570,24 @@ func _draw() -> void:
 		draw_arc(Vector2.ZERO, 38.0, -PI * 0.5, -PI * 0.5 + TAU * hr, 40,
 			Color(hc.r, hc.g, hc.b, 0.9), 4.0, true)
 
-	# 能量尾带
-	var rb := PackedVector2Array()
-	for i in 9:
-		var t := float(i) / 8.0
-		rb.append(Vector2(-18.0 - t * 34.0, sin(_time * 6.0 - t * 4.0) * 7.0 * t))
-	draw_polyline(rb, Color(m.r, m.g, m.b, 0.55), 3.0, true)
+	# 推进器 · 喷射效果（2026-09-22 替代原「能量尾带」波浪尾带）
+	# 玩家朝 +X：喷嘴在 −X 机身尾缘，焰朝 −X 喷出。三层：喷嘴壳 → 外焰 → 焰心。
+	#   · 焰长抖动 ≈1.4Hz（守 ≤3Hz 光敏线）
+	#   · 喷嘴壳用中性钢色 STEEL，读作机械件，不占属性色通道（属性色留给本体/焰）
+	#   · 外焰 GLOW 宽而淡、焰心 CORE 窄而亮 —— 与星盗侧「推进器壳+焰心」同语汇
+	var jf := 1.0 + 0.12 * sin(_time * 9.0)
+	var jx := -19.0
+	var jl := 30.0 * jf
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(jx + 4.0, -5.2), Vector2(jx - 5.0, -3.4),
+		Vector2(jx - 5.0, 3.4), Vector2(jx + 4.0, 5.2),
+	]), Game.STEEL)
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(jx - 4.0, -4.0), Vector2(jx - jl, 0.0), Vector2(jx - 4.0, 4.0),
+	]), Color(g.r, g.g, g.b, 0.45))
+	draw_colored_polygon(PackedVector2Array([
+		Vector2(jx - 4.0, -2.0), Vector2(jx - jl * 0.60, 0.0), Vector2(jx - 4.0, 2.0),
+	]), Color(k.r, k.g, k.b, 0.90))
 
 	# 战甲本体（人形机甲 · 机身主装甲，侧视前倾；几何沿用已验证骨架）
 	var body := PackedVector2Array([

@@ -57,13 +57,24 @@ static func draw(ci: CanvasItem, pos: Vector2, c: int, t: float, s: float) -> vo
 			])
 			ci.draw_colored_polygon(q, Color(k.r, k.g, k.b, 0.55))
 
-	# 能量尾带（身后）
-	var rb := PackedVector2Array()
-	for i in 10:
-		var u := float(i) / 9.0
-		rb.append(pos + Vector2((-18.0 - u * 46.0) * s,
-			sin(t * 4.0 - u * 4.0) * 8.0 * u * s))
-	ci.draw_polyline(rb, Color(m.r, m.g, m.b, 0.5), 3.2 * s, true)
+	# 推进器 · 喷射效果（2026-09-22 替代原「能量尾带」波浪尾带）
+	# 与 Player._draw 同语汇同参数：喷嘴壳（STEEL）→ 外焰（GLOW）→ 焰心（CORE），焰朝 −X。
+	# 战甲库 / 择甲界面是静态展示，仍按 t 抖动焰长，避免四件甲看起来像贴图。
+	var jf := 1.0 + 0.12 * sin(t * 9.0)
+	var jx := -19.0
+	var jl := 30.0 * jf
+	ci.draw_colored_polygon(PackedVector2Array([
+		pos + Vector2(jx + 4.0, -5.2) * s, pos + Vector2(jx - 5.0, -3.4) * s,
+		pos + Vector2(jx - 5.0, 3.4) * s, pos + Vector2(jx + 4.0, 5.2) * s,
+	]), Game.STEEL)
+	ci.draw_colored_polygon(PackedVector2Array([
+		pos + Vector2(jx - 4.0, -4.0) * s, pos + Vector2(jx - jl, 0.0) * s,
+		pos + Vector2(jx - 4.0, 4.0) * s,
+	]), Color(g.r, g.g, g.b, 0.45))
+	ci.draw_colored_polygon(PackedVector2Array([
+		pos + Vector2(jx - 4.0, -2.0) * s, pos + Vector2(jx - jl * 0.60, 0.0) * s,
+		pos + Vector2(jx - 4.0, 2.0) * s,
+	]), Color(k.r, k.g, k.b, 0.90))
 
 	# 电浆剑甲：前置双刃
 	if c == Game.RED:
