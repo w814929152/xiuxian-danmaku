@@ -1,0 +1,12 @@
+# Godot 自动生成的元数据文件恒用 LF。
+#
+# 背景：本机 `core.autocrlf=true`，而 Godot `--import` 写出的 `*.import` 是 LF。
+# 于是每次导入 / 新建 worktree，git 都会把已入库的 LF 检出成 CRLF，
+# 再与 Godot 重写后的 LF 比对 —— 产生 21 条「diff 内容为空、只有换行差异」的幽灵改动。
+# 对这两类文件强制 `eol=lf`，从检出侧就断根，不再依赖每台机器的 autocrlf 设置。
+#
+# 只锁元数据文件：**刻意不锁** `*.gd` / `*.tscn` / `*.tres`。
+# 那些文件在两台机器上的工作副本换行并不一致（仓库存 LF，部分副本已被检出成 CRLF），
+# 一旦在这里声明，会把所有源码一次性掀成「全量换行变更」，淹掉真正的改动。
+*.import text eol=lf
+*.uid text eol=lf
