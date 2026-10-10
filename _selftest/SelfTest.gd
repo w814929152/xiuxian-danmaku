@@ -1705,44 +1705,39 @@ func _sil_max_x(text: String, name: String) -> float:
 	return maxx
 
 
-## V7：L3 炮垒外挂件贴装检查（07 §2.4）。bx / 炮塔间距 / 装甲带三处挂件必须跟着
-##   SIL_BATTERY 联动 —— 动剪影忘挂件就画断件（炮塔悬空、炮塔出舷、装甲带越界）。
-##   bx / off / 装甲带都是函数局部变量，拿不到常量，只能源码文本扫描（_func_body 够用）。
-##   三条判据：
-##     ① _turret 的 bx 系数 = SIL_BATTERY 的 −X 顶点 x（贴装面不悬空）
-##     ② 炮塔间距 (base+step·(n/2−1))+0.055 ≤ 舷半高（−X 顶点 |y|），按 n=4/6/8 三档各算
-##     ③ 装甲带 x0 > −X 顶点 x（内缩）且右端 x0+w < 舰体右界（max x）
+## V7：L3 炮垒外挂件贴装检查（07 §2.4；2026-10 简化重做后改为炮口贴装口径）。
+##   旧口径（炮塔座 / 挂梁 / 装甲带三处批绘）随机甲化简化一并删除。
+##   两条判据：
+##     ① _l3_guns 的 bx 系数 = SIL_BATTERY 的 −X 顶点 x（炮管贴装面不悬空）
+##     ② 炮口 y 偏移 (base+step·(half−1)) + 炮口半径 ≤ 舷半高（−X 顶点 |y|），
+##       按 half=1/2/3 三档各算 —— 炮口不出舷
 func _boss_attachments(bossart: String) -> bool:
-	# 解析 SIL_BATTERY 的 −X 顶点 x（最小 x）、右界（最大 x）、−X 顶点 |y|（舷半高）
+	# 解析 SIL_BATTERY 的 −X 顶点 x（最小 x）、−X 顶点 |y|（舷半高）
 	var re_sil := RegEx.new()
 	re_sil.compile("const\\s+SIL_BATTERY\\s*:=\\s*\\[([^\\]]+)\\]")
 	var ms := re_sil.search(bossart)
 	if ms == null:
 		return false
 	var minx := 0.0
-	var maxx := 0.0
 	var half_h := 0.0
 	var first := true
 	for v in _parse_vec2_array(ms.get_string(1)):
 		if first:
 			minx = v.x
-			maxx = v.x
 			first = false
 		minx = minf(minx, v.x)
-		maxx = maxf(maxx, v.x)
 		if absf(v.x - minx) < 0.001:
 			half_h = maxf(half_h, absf(v.y))   # −X 顶点 |y| = 舷半高
-	# ① _turret 的 bx 系数必须 = −X 顶点 x
-	var bt := _func_body(bossart, "_turret")
+	# ① _l3_guns 的 bx 系数必须 = −X 顶点 x
+	var bl := _func_body(bossart, "_l3_guns")
 	var re_bx := RegEx.new()
 	re_bx.compile("bx\\s*:=\\s*(-?[0-9.]+)\\s*\\*\\s*r")
-	var mb := re_bx.search(bt)
+	var mb := re_bx.search(bl)
 	if mb == null:
 		return false
 	if absf(float(mb.get_string(1)) - minx) > 0.001:
 		return false
-	# ② _l3_guns 炮塔间距：按 n=4/6/8 三档，(base+step·(n/2−1))+0.055 ≤ 舷半高
-	var bl := _func_body(bossart, "_l3_guns")
+	# ② 炮口 y 偏移：按 half=1/2/3 三档，(base+step·(half−1))+炮口半径 ≤ 舷半高
 	var re_off := RegEx.new()
 	re_off.compile("\\(\\s*([0-9.]+)\\s*\\+\\s*([0-9.]+)\\s*\\*\\s*float\\(j\\)\\s*\\)")
 	var mo := re_off.search(bl)
@@ -1750,23 +1745,11 @@ func _boss_attachments(bossart: String) -> bool:
 		return false
 	var base := float(mo.get_string(1))
 	var step := float(mo.get_string(2))
-	for n in [4, 6, 8]:
-		var tip: float = base + step * float(n / 2 - 1) + 0.055
+	const MUZZLE_R := 0.05          # 炮口圆头半径（BossArt._l3_guns）
+	for half in [1, 2, 3]:
+		var tip: float = base + step * float(half - 1) + MUZZLE_R
 		if tip > half_h + 0.001:
 			return false
-	# ③ 装甲带：x0 > −X 顶点 x（内缩）且右端 x0+w < 舰体右界
-	var bd := _func_body(bossart, "draw_battery")
-	var re_arm := RegEx.new()
-	re_arm.compile("Rect2\\(\\s*(-?[0-9.]+)\\s*\\*\\s*r\\s*,\\s*yy\\s*,\\s*([0-9.]+)\\s*\\*\\s*r")
-	var ma := re_arm.search(bd)
-	if ma == null:
-		return false
-	var x0 := float(ma.get_string(1))
-	var w := float(ma.get_string(2))
-	if x0 <= minx:        # 必须内缩（x0 在 −X 顶点内侧，更不负）
-		return false
-	if x0 + w > maxx:     # 右端不越舰体右界
-		return false
 	return true
 
 
